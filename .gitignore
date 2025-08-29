@@ -1,0 +1,52 @@
+# Node / Package managers
+node_modules/
+.npm/
+.pnpm-store/
+
+# Build artifacts
+.dist/
+dist/
+build/
+out/
+.temp/
+tmp/
+.temp/**
+
+# Electron Forge / Webpack
+.webpack/
+forge-out/
+.cache/
+*.tsbuildinfo
+
+# Tests / Coverage
+coverage/
+.nyc_output/
+.jest/**
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env / Secrets
+.env
+.env.*
+!.env.example
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker (local data mounts)
+docker/**/data/
+
+# Misc
+.eslintcache
+*.pid

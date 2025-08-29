@@ -1,0 +1,18 @@
+# Minimal SearxNG overrides for local development
+# Enables JSON output to avoid 403 on /search?format=json
+# See: https://docs.searxng.org/admin/settings/settings.html
+
+use_default_settings: true
+
+server:
+  # Any random string; for local dev only
+  secret_key: "dev-change-me-please"
+  public_instance: false
+  limiter: false
+
+search:
+  # Allow JSON responses from /search
+  formats:
+    - html
+    - json
+  safe_search: 0
