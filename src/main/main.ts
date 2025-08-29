@@ -1,4 +1,4 @@
-import { app, BrowserWindow, BrowserView, ipcMain, session, shell, Menu } from 'electron';
+import { app, BrowserWindow, BrowserView, ipcMain, session, shell, Menu, nativeTheme } from 'electron';
 import type { IpcMainInvokeEvent, Event as ElectronEvent } from 'electron';
 import path from 'path';
 import { loadConfig, ensureConfigDir, AppConfig, saveConfig } from './services/config';
@@ -10,6 +10,83 @@ import { SearchService } from './services/search';
 import { IndexerService } from './services/indexer';
 import { ImportService } from './services/import';
 import type { ImportRunOptions } from './services/import';
+
+// Store current theme for immediate application to new tabs
+let currentTheme = 'dark'; // Default theme
+
+// Helper function to apply theme CSS to webContents
+function applyThemeToWebContents(webContents: Electron.WebContents, themeName?: string) {
+  if (!webContents || webContents.isDestroyed()) return;
+  
+  const isDarkTheme = themeName === 'dark' || themeName === 'nord' || themeName === 'cyberpunk';
+  
+  // For light themes
+  if (!isDarkTheme) {
+    const lightCss = `
+      html, body, div, main, article, section, header, footer, nav, aside {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+      }
+      * {
+        color-scheme: light !important;
+      }
+      a, a:visited, a:hover, a:active {
+        color: #0066cc !important;
+      }
+      p, span, h1, h2, h3, h4, h5, h6, li, dt, dd, blockquote, figcaption, label, legend {
+        color: #000000 !important;
+      }
+      input, textarea, select, button {
+        background-color: #f8f8f8 !important;
+        color: #000000 !important;
+        border-color: #d1d1d1 !important;
+      }
+      /* Force override for common frameworks */
+      .bg-dark, [class*='bg-dark'], [class*='bg-black'] {
+        background-color: #ffffff !important;
+      }
+      .text-white, [class*='text-light'] {
+        color: #000000 !important;
+      }
+    `;
+    webContents.insertCSS(lightCss).catch(() => {});
+    return;
+  }
+  
+  // For dark themes
+  const darkCss = `
+    html, body, div, main, article, section, header, footer, nav, aside {
+      background-color: #09090b !important;
+      color: #ffffff !important;
+    }
+    * {
+      color-scheme: dark !important;
+    }
+    a, a:visited, a:hover, a:active {
+      color: #60a5fa !important;
+    }
+    p, span, h1, h2, h3, h4, h5, h6, li, dt, dd, blockquote, figcaption, label, legend {
+      color: #ffffff !important;
+    }
+    input, textarea, select, button {
+      background-color: #1f1f23 !important;
+      color: #ffffff !important;
+      border-color: #383838 !important;
+    }
+    img, video {
+      filter: brightness(.8) contrast(1.2);
+    }
+    /* Force override for common frameworks */
+    .bg-white, [class*='bg-light'], [class*='bg-default'], [class*='bg-body'] {
+      background-color: #09090b !important;
+    }
+    .text-dark, [class*='text-black'], [class*='text-default'] {
+      color: #ffffff !important;
+    }
+  `;
+  
+  webContents.insertCSS(darkCss).catch(() => {});
+}
 // MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY and MAIN_WINDOW_WEBPACK_ENTRY are provided by forge webpack plugin as globals
 
 // In development use a separate userData to avoid locks with previous runs
@@ -101,6 +178,11 @@ function createTab(initialUrl?: string) {
       nodeIntegration: false,
     },
   });
+  
+  // Set background color separately as it's not part of the constructor options
+  try {
+    v.setBackgroundColor('#09090b'); // Default to dark theme background
+  } catch {}
   // Hide native menu bar so our tabs strip can be visually on top
   try { mainWindow.setMenuBarVisibility(false); } catch {}
   try { mainWindow.setAutoHideMenuBar(true); } catch {}
@@ -113,6 +195,30 @@ function createTab(initialUrl?: string) {
   v.webContents.on('page-title-updated', (_e, title) => {
     t.title = String(title || '');
     sendRenderer('tabs:updated', listTabs());
+  });
+  
+  // Inject theme CSS when page loads
+  v.webContents.on('did-finish-load', () => {
+    try {
+      // Apply theme immediately using the stored theme
+      applyThemeToWebContents(v.webContents, currentTheme);
+    } catch {}
+  });
+  
+  // Also apply theme on navigation
+  v.webContents.on('did-navigate', () => {
+    try {
+      // Apply theme immediately using the stored theme
+      applyThemeToWebContents(v.webContents, currentTheme);
+    } catch {}
+  });
+  
+  // Apply theme on dom-ready as well for faster application
+  v.webContents.on('dom-ready', () => {
+    try {
+      // Apply theme immediately using the stored theme
+      applyThemeToWebContents(v.webContents, currentTheme);
+    } catch {}
   });
   v.webContents.on('did-navigate', async (_e, urlStr) => {
     t.url = String(urlStr || '');
@@ -201,6 +307,16 @@ function createTab(initialUrl?: string) {
   // Also schedule a couple of delayed attempts to cover race conditions
   try { setTimeout(() => attachViewIfReady(), 50); } catch {}
   try { setTimeout(() => attachViewIfReady(), 300); } catch {}
+  
+  // Set initial background color based on system preference and apply theme
+  try {
+    const isDarkMode = nativeTheme?.shouldUseDarkColors ?? true;
+    const initialColor = isDarkMode ? '#09090b' : '#ffffff';
+    v.setBackgroundColor(initialColor);
+    
+    // Apply theme immediately
+    applyThemeToWebContents(v.webContents, currentTheme);
+  } catch {}
 
   // Activate
   activateTab(id);
@@ -344,19 +460,18 @@ async function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1366,
-    height: 900,
-    title: 'Comet',
-    resizable: true,
-    minWidth: 960,
-    minHeight: 600,
-    show: true,
+    width: 1280,
+    height: 800,
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
-      contextIsolation: true,
       nodeIntegration: false,
+      contextIsolation: true,
     },
+    backgroundColor: '#09090b', // Default to dark theme background
+    show: false,
   });
+  
+  // Using the currentTheme variable defined at the top of the file
 
   // Reader mode (basic)
   let isReaderMode = false;
@@ -713,6 +828,41 @@ async function createWindow() {
       return search.getProvider();
     }
   );
+
+  // Handle theme-based background color changes
+  ipcMain.on('set-background-color', (_e: ElectronEvent, color: string, themeName?: string) => {
+    try {
+      if (mainWindow && color) {
+        // Store current theme for immediate application to new tabs
+        if (themeName) {
+          currentTheme = themeName;
+        }
+        
+        mainWindow.setBackgroundColor(color);
+        
+        // Also update all browser views with the same background color
+        tabs.forEach(tab => {
+          try {
+            if (tab.view && tab.view.webContents && !tab.view.webContents.isDestroyed()) {
+              tab.view.setBackgroundColor(color);
+              
+              // Re-inject CSS with the new theme
+              applyThemeToWebContents(tab.view.webContents, themeName);
+            }
+          } catch {}
+        });
+        
+        // Update the active view
+        if (view) {
+          try {
+            view.setBackgroundColor(color);
+          } catch {}
+        }
+      }
+    } catch {}
+  });
+  
+  // Using the applyThemeToWebContents function defined at the top of the file
 
   // Onboarding flags (first-run wizard gating)
   ipcMain.handle('onboarding:get', async () => config.onboarding || { showImportOnFirstRun: false, importCompleted: true });

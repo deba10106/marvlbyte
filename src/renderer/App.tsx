@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ImportWizard } from './components/ImportWizard';
+import { ThemeSelector } from './components/theme-selector';
+import { useTheme } from './components/theme-provider';
+import { Button } from './components/ui/button';
+import { Moon, Sun, ArrowLeft, ArrowRight, RefreshCw, BookmarkIcon, Import, PanelRightClose, PanelRightOpen, BookOpen } from 'lucide-react';
 
 export function App() {
+  const { theme } = useTheme();
   const [omnibox, setOmnibox] = useState('');
   const [currentUrl, setCurrentUrl] = useState('');
   const [tabs, setTabs] = useState<Array<{ id: string; title: string; url: string; active: boolean }>>([]);
@@ -179,12 +184,12 @@ export function App() {
   const Item = useMemo(() => (
     function Item({ title, sub, href }: { title: string; sub?: string; href?: string }) {
       return (
-        <div className="px-3 py-2 rounded border border-gray-200 hover:bg-gray-50">
+        <div className="px-3 py-2 rounded border border-border bg-card text-card-foreground hover:bg-accent/10">
           <div className="font-medium text-sm truncate">{title}</div>
-          {sub ? <div className="text-xs text-gray-600 truncate">{sub}</div> : null}
+          {sub ? <div className="text-xs text-muted-foreground truncate">{sub}</div> : null}
           {href ? (
             <button
-              className="text-xs text-blue-600 hover:underline mt-1"
+              className="text-xs text-primary hover:underline mt-1"
               onClick={() => setOmnibox(href)}
               title="Copy to omnibox"
             >
@@ -196,37 +201,50 @@ export function App() {
     }
   ), []);
 
+  // Force dark mode  // Update main window background color when theme changes
+  useEffect(() => {
+    const root = window.document.documentElement;
+    const backgroundColor = getComputedStyle(root).getPropertyValue('--background').trim();
+    if (backgroundColor && window.comet?.ipcRenderer) {
+      window.comet.ipcRenderer.send('set-background-color', backgroundColor, theme);
+    }
+  }, [theme]);
+
   return (
-    <div className="h-screen w-screen">
+    <div className="h-screen w-screen bg-background text-foreground">
       {/* Tabs strip (topmost) */}
-      <div className="fixed top-0 left-0 right-0 h-8 bg-white border-b border-gray-200 flex items-center gap-1 px-2 overflow-auto">
+      <div className="fixed top-0 left-0 right-0 h-8 bg-background border-b border-border flex items-center gap-1 px-2 overflow-auto">
         {tabs.map((t) => (
-          <div key={t.id} className={`flex items-center gap-1 px-2 py-0.5 rounded border text-xs whitespace-nowrap ${t.active ? 'bg-gray-100 border-gray-400' : 'border-gray-200'}`}>
+          <div key={t.id} className={`flex items-center gap-1 px-2 py-0.5 rounded border text-xs whitespace-nowrap ${t.active ? 'bg-accent border-accent-foreground' : 'border-border'}`}>
             <button className="truncate max-w-[140px]" title={t.title || t.url} onClick={() => window.comet.tabs.activate(t.id)}>
               {t.title || t.url || 'New Tab'}
             </button>
-            <button className="text-gray-500 hover:text-black" title="Close tab" onClick={() => window.comet.tabs.close(t.id)}>×</button>
+            <button className="text-muted-foreground hover:text-foreground" title="Close tab" onClick={() => window.comet.tabs.close(t.id)}>×</button>
           </div>
         ))}
-        <button className="px-2 py-0.5 border rounded text-xs" title="New Tab" onClick={() => window.comet.tabs.create()}>＋</button>
+        <button className="px-2 py-0.5 border rounded text-xs text-foreground bg-background border-border" title="New Tab" onClick={() => window.comet.tabs.create()}>＋</button>
       </div>
 
       {/* Toolbar below tabs strip */}
-      <div className="fixed top-8 left-0 right-0 h-16 bg-white border-b border-gray-200 flex items-center gap-2 px-3 overflow-hidden">
+      <div className="fixed top-8 left-0 right-0 h-16 bg-background border-b border-border flex items-center gap-2 px-3 overflow-hidden">
         {/* Nav buttons moved to the left of the omnibox */}
         <div className="flex items-center gap-2">
-          <button onClick={() => window.comet.goBack()} className="px-2 py-1 border rounded" title="Back">◀</button>
-          <button onClick={() => window.comet.goForward()} className="px-2 py-1 border rounded" title="Forward">▶</button>
+          <Button variant="outline" size="sm" onClick={() => window.comet.goBack()} title="Back">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.comet.goForward()} title="Forward">
+            <ArrowRight className="h-4 w-4" />
+          </Button>
         </div>
         <form onSubmit={onNavigate} className="flex-1 flex gap-2 items-center min-w-0">
           <input
             value={omnibox}
             onChange={(e) => setOmnibox(e.target.value)}
-            className="flex-1 px-3 py-2 rounded border border-gray-300 focus:outline-none focus:ring focus:ring-blue-200"
+            className="flex-1 px-3 py-2 rounded border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             placeholder="Search or enter address"
           />
-          <label className="text-xs text-gray-600">via</label>
-          <select value={provider} onChange={onChangeProvider} className="text-xs border rounded px-2 py-2">
+          <label className="text-xs text-foreground">via</label>
+          <select value={provider} onChange={onChangeProvider} className="text-xs border rounded px-2 py-2 bg-background border-input">
             <option value="searxng">searxng</option>
             <option value="brave">brave</option>
             <option value="google">google</option>
@@ -234,25 +252,32 @@ export function App() {
             <option value="presearch">presearch</option>
             <option value="auto">auto</option>
           </select>
-          <button disabled={busy} className="px-3 py-2 bg-blue-600 text-white rounded">Go</button>
+          <Button disabled={busy} variant="default" size="sm">Go</Button>
         </form>
         <div className="flex gap-2">
-          <button onClick={() => setShowImport(true)} className="px-2 py-1 border rounded" title="Import browser data">
-            Import
-          </button>
-          <button onClick={toggleSidebar} className="px-2 py-1 border rounded" title="Toggle sidebar (Ctrl+B)">
-            {sidebarCollapsed ? 'Show AI' : 'Hide AI'}
-          </button>
-          <button onClick={() => window.comet.reload()} className="px-2 py-1 border rounded">⟳</button>
-          <button onClick={() => window.comet.toggleReader()} className="px-2 py-1 border rounded">Read</button>
-          <button onClick={toggleBookmark} className="px-2 py-1 border rounded">☆</button>
+          <Button variant="outline" size="sm" onClick={() => setShowImport(true)} title="Import browser data">
+            <Import className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={toggleSidebar} title="Toggle sidebar (Ctrl+B)">
+            {sidebarCollapsed ? <PanelRightOpen className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.comet.reload()} title="Reload">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.comet.toggleReader()} title="Reader mode">
+            <BookOpen className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={toggleBookmark} title="Bookmark">
+            <BookmarkIcon className="h-4 w-4" />
+          </Button>
+          <ThemeSelector />
         </div>
       </div>
 
       {/* Right sidebar (clickable area not covered by BrowserView) */}
       {!sidebarCollapsed && (
         <div className="fixed top-24 right-0 bottom-8" style={{ width: SIDEBAR_WIDTH }}>
-          <div className="relative h-full w-full border-l bg-white">
+          <div className="relative h-full w-full border-l bg-background">
             {/* Scrollable content area with bottom padding for input bar */}
             <div className="absolute inset-0 overflow-auto p-4 pb-28 space-y-3">
               <div className="text-sm font-semibold">Local Search + AI</div>
@@ -261,10 +286,10 @@ export function App() {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded border border-gray-300"
+                  className="flex-1 px-3 py-2 rounded border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                   placeholder="Search local history and documents"
                 />
-                <button onClick={runLocalSearch} disabled={busy} className="px-3 py-2 bg-gray-700 text-white rounded">Local</button>
+                <Button onClick={runLocalSearch} disabled={busy} variant="secondary" size="sm">Local</Button>
               </div>
 
               <div className="grid gap-2">
@@ -280,11 +305,11 @@ export function App() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-xs text-gray-600">No local results yet.</div>
+                  <div className="text-xs text-muted-foreground">No local results yet.</div>
                 )}
 
                 {/* Side panel mode switch */}
-                <div className="flex items-center gap-2 text-xs">
+                <div className="flex items-center gap-2 text-xs text-foreground">
                   <label className="flex items-center gap-1"><input type="radio" checked={sideMode==='chat'} onChange={() => setSideMode('chat')} /> Chat</label>
                   <label className="flex items-center gap-1"><input type="radio" checked={sideMode==='agent'} onChange={() => setSideMode('agent')} /> Agent</label>
                 </div>
@@ -295,7 +320,7 @@ export function App() {
                     {chatMessages.map((m, i) => (
                       <div
                         key={i}
-                        className={`text-sm p-3 rounded border ${m.role === 'assistant' ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}
+                        className={`text-sm p-3 rounded border ${m.role === 'assistant' ? 'bg-accent/20 border-accent' : 'bg-card border-border'}`}
                         {...(m.role === 'assistant' ? { dangerouslySetInnerHTML: { __html: renderAssistantHtml(m.content) } } : {})}
                         onClick={async (e) => {
                           const t = e.target as HTMLElement | null;
@@ -330,13 +355,13 @@ export function App() {
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitChat(); } }}
-                  className="flex-1 px-3 py-2 rounded border border-gray-300"
+                  className="flex-1 px-3 py-2 rounded border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                   placeholder={sideMode === 'agent' ? 'Ask the Agent' : 'Ask the AI assistant'}
                 />
-                <label className="text-xs flex items-center gap-1">
+                <label className="text-xs text-foreground flex items-center gap-1">
                   <input type="checkbox" checked={includePage} onChange={(e) => setIncludePage(e.target.checked)} /> include page
                 </label>
-                <button onClick={submitChat} disabled={busy} className="px-3 py-2 bg-emerald-600 text-white rounded">Ask</button>
+                <Button onClick={submitChat} disabled={busy} variant="default">Ask</Button>
               </div>
             </div>
           </div>
@@ -344,7 +369,7 @@ export function App() {
       )}
 
       {/* Footer */}
-      <div className="fixed bottom-0 left-0 right-0 h-8 bg-white border-t border-gray-200 px-3 flex items-center text-xs text-gray-600 truncate">
+      <div className="fixed bottom-0 left-0 right-0 h-8 bg-background border-t border-border px-3 flex items-center text-xs text-muted-foreground truncate">
         <span className="truncate">{currentUrl}</span>
       </div>
 

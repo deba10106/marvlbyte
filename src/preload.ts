@@ -9,6 +9,10 @@ export type LocalSearchResult =
 export type SearchProvider = 'auto' | 'brave' | 'searxng' | 'google' | 'bing' | 'presearch';
 
 export interface CometApi {
+  // Direct access to ipcRenderer for theme-related messages
+  ipcRenderer: {
+    send: (channel: string, ...args: any[]) => void;
+  };
   navigate: (input: string) => Promise<void>;
   goBack: () => Promise<void>;
   goForward: () => Promise<void>;
@@ -88,6 +92,10 @@ export interface CometApi {
 }
 
 const api: CometApi = {
+  // Expose limited ipcRenderer for theme-related messages
+  ipcRenderer: {
+    send: (channel: string, ...args: any[]) => ipcRenderer.send(channel, ...args),
+  },
   navigate: (input: string) => ipcRenderer.invoke('omnibox:navigate', input),
   goBack: () => ipcRenderer.invoke('nav:back'),
   goForward: () => ipcRenderer.invoke('nav:forward'),
