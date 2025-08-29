@@ -1,6 +1,8 @@
 import { app, BrowserWindow, BrowserView, ipcMain, session, shell, Menu, nativeTheme } from 'electron';
+import { EventEmitter } from 'events';
 import type { IpcMainInvokeEvent, Event as ElectronEvent } from 'electron';
 import path from 'path';
+
 import { loadConfig, ensureConfigDir, AppConfig, saveConfig } from './services/config';
 import { getDb } from './services/db';
 import { BookmarksService } from './services/bookmarks';
@@ -11,6 +13,14 @@ import { IndexerService } from './services/indexer';
 import { ImportService } from './services/import';
 import type { ImportRunOptions } from './services/import';
 
+// Increase the default max listeners to prevent MaxListenersExceededWarning
+EventEmitter.defaultMaxListeners = 20;
+
+// Configure app for media handling to fix ffmpeg errors
+app.commandLine.appendSwitch('ignore-gpu-blacklist');
+app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder');
+app.commandLine.appendSwitch('disable-features', 'UseChromeOSDirectVideoDecoder');
+
 // Store current theme for immediate application to new tabs
 let currentTheme = 'dark'; // Default theme
 
@@ -18,10 +28,8 @@ let currentTheme = 'dark'; // Default theme
 function applyThemeToWebContents(webContents: Electron.WebContents, themeName?: string) {
   if (!webContents || webContents.isDestroyed()) return;
   
-  const isDarkTheme = themeName === 'dark' || themeName === 'nord' || themeName === 'cyberpunk';
-  
-  // For light themes
-  if (!isDarkTheme) {
+  // Handle each theme type separately
+  if (themeName === 'light') {
     const lightCss = `
       html, body, div, main, article, section, header, footer, nav, aside {
         background-color: #ffffff !important;
@@ -53,7 +61,79 @@ function applyThemeToWebContents(webContents: Electron.WebContents, themeName?: 
     return;
   }
   
-  // For dark themes
+  // Nord theme specific styling
+  if (themeName === 'nord') {
+    const nordCss = `
+      html, body, div, main, article, section, header, footer, nav, aside {
+        background-color: #2e3440 !important;
+        color: #d8dee9 !important;
+      }
+      * {
+        color-scheme: dark !important;
+      }
+      a, a:visited, a:hover, a:active {
+        color: #88c0d0 !important;
+      }
+      p, span, h1, h2, h3, h4, h5, h6, li, dt, dd, blockquote, figcaption, label, legend {
+        color: #e5e9f0 !important;
+      }
+      input, textarea, select, button {
+        background-color: #3b4252 !important;
+        color: #e5e9f0 !important;
+        border-color: #4c566a !important;
+      }
+      img, video {
+        filter: brightness(.9) contrast(1.1);
+      }
+      /* Force override for common frameworks */
+      .bg-white, [class*='bg-light'], [class*='bg-default'], [class*='bg-body'] {
+        background-color: #2e3440 !important;
+      }
+      .text-dark, [class*='text-black'], [class*='text-default'] {
+        color: #e5e9f0 !important;
+      }
+    `;
+    webContents.insertCSS(nordCss).catch(() => {});
+    return;
+  }
+  
+  // Cyberpunk theme specific styling
+  if (themeName === 'cyberpunk') {
+    const cyberpunkCss = `
+      html, body, div, main, article, section, header, footer, nav, aside {
+        background-color: #120458 !important;
+        color: #f8f8f2 !important;
+      }
+      * {
+        color-scheme: dark !important;
+      }
+      a, a:visited, a:hover, a:active {
+        color: #f92aad !important;
+      }
+      p, span, h1, h2, h3, h4, h5, h6, li, dt, dd, blockquote, figcaption, label, legend {
+        color: #f8f8f2 !important;
+      }
+      input, textarea, select, button {
+        background-color: #2d1b69 !important;
+        color: #f8f8f2 !important;
+        border-color: #f92aad !important;
+      }
+      img, video {
+        filter: brightness(.9) contrast(1.2) saturate(1.2);
+      }
+      /* Force override for common frameworks */
+      .bg-white, [class*='bg-light'], [class*='bg-default'], [class*='bg-body'] {
+        background-color: #120458 !important;
+      }
+      .text-dark, [class*='text-black'], [class*='text-default'] {
+        color: #f8f8f2 !important;
+      }
+    `;
+    webContents.insertCSS(cyberpunkCss).catch(() => {});
+    return;
+  }
+  
+  // Default dark theme
   const darkCss = `
     html, body, div, main, article, section, header, footer, nav, aside {
       background-color: #09090b !important;
@@ -176,8 +256,38 @@ function createTab(initialUrl?: string) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload-view.js'),
+      // Add media-specific settings
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
+  
+  // Configure session for media handling
+  try {
+    const ses = v.webContents.session;
+    
+    // Configure content settings for media
+    ses.setPermissionRequestHandler((webContents, permission, callback) => {
+      // Allow media permissions by default
+      if (permission === 'media') {
+        callback(true);
+        return;
+      }
+      callback(false);
+    });
+    
+    // Configure content blocker to suppress ERR_BLOCKED_BY_CLIENT warnings
+    ses.webRequest.onErrorOccurred((details) => {
+      // Silently handle blocked requests
+      if (details.error === 'ERR_BLOCKED_BY_CLIENT') {
+        // This is handled by our preload script's console filter
+        return;
+      }
+    });
+  } catch (e) {
+    console.log('Error configuring session:', e);
+  }
   
   // Set background color separately as it's not part of the constructor options
   try {
@@ -374,7 +484,7 @@ async function createWindow() {
   const bookmarks = new BookmarksService(db);
   historyService = new HistoryService(db);
   const ai = new AiService(config);
-  const search = new SearchService(config, ai);
+  const search = new SearchService(config);
   const indexer = new IndexerService(config, db);
   indexer.start().catch(() => {});
   const importer = new ImportService(bookmarks, historyService!);
@@ -1033,6 +1143,10 @@ if (!gotLock) {
       try { mainWindow.show(); } catch {}
     }
   });
+  app.commandLine.appendSwitch('ignore-gpu-blacklist');
+  app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder');
+  app.commandLine.appendSwitch('disable-features', 'UseChromeOSDirectVideoDecoder');
+
   app.whenReady().then(createWindow);
 }
 

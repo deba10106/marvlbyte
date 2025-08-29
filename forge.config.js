@@ -26,6 +26,7 @@ module.exports = {
         entry: {
           main: path.resolve(__dirname, 'src/main/main.ts'),
           tabPreload: path.resolve(__dirname, 'src/tabPreload.ts'),
+          'preload-view': path.resolve(__dirname, 'src/main/preload-view.ts'),
         },
         target: 'electron-main',
         externals: {

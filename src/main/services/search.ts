@@ -1,18 +1,15 @@
 import axios from 'axios';
 import type { AppConfig } from './config';
-import type { AiService } from './ai';
 
 export type BraveResult = { title: string; description: string; url: string };
 export type BraveSearchResponse = { results: BraveResult[]; query: string; summary?: string; suggestions?: string[] };
 
 export class SearchService {
   private cfg: AppConfig;
-  private ai: AiService;
   private overrideProvider?: AppConfig['search']['provider'];
 
-  constructor(cfg: AppConfig, ai: AiService) {
+  constructor(cfg: AppConfig) {
     this.cfg = cfg;
-    this.ai = ai;
   }
 
   private pickProvider(): AppConfig['search']['provider'] {
@@ -66,19 +63,9 @@ export class SearchService {
     else if (provider === 'presearch') results = await this.searchPresearch(query);
     else throw new Error(`Unsupported provider: ${provider}`);
 
-    let summary = '';
-    if (results.length && !options?.skipSummary) {
-      const lines = results.slice(0, 8).map((r, i) => `${i + 1}. ${r.title} — ${r.description}\n${r.url}`);
-      const prompt: string = `Given the following web search results for "${query}", provide a concise, neutral summary (4-6 sentences) and list 3 suggested follow-up questions.\n\nResults:\n${lines.join('\n\n')}`;
-      summary = await this.ai.chat([
-        { role: 'system', content: 'You summarize web search results succinctly and accurately.' },
-        { role: 'user', content: prompt },
-      ]);
-    }
-
-    const suggestions = (summary.match(/(?:^|\n)\s*(?:-\s+|\d+\.\s+)(.+)/g) || [])
-      .map((s) => s.replace(/(?:^|\n)\s*(?:-\s+|\d+\.\s+)/, '').trim())
-      .slice(0, 5);
+    // No LLM API calls for summaries or suggestions
+    const summary = '';
+    const suggestions: string[] = [];
 
     return { results, query, summary, suggestions };
   }

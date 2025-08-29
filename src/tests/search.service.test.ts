@@ -32,13 +32,12 @@ function baseConfig(): AppConfig {
   };
 }
 
-const dummyAi: any = { chat: async () => '' };
 
 describe('SearchService provider selection', () => {
   it('returns configured provider when not auto', () => {
     const cfg = baseConfig();
     cfg.search.provider = 'searxng';
-    const svc = new SearchService(cfg, dummyAi);
+    const svc = new SearchService(cfg);
     expect(svc.getProvider()).toBe('searxng');
   });
 
@@ -46,7 +45,7 @@ describe('SearchService provider selection', () => {
     const cfg = baseConfig();
     cfg.search.provider = 'auto';
     cfg.search.brave.apiKey = 'abc123';
-    const svc = new SearchService(cfg, dummyAi);
+    const svc = new SearchService(cfg);
     expect(svc.getProvider()).toBe('brave');
   });
 
@@ -55,7 +54,7 @@ describe('SearchService provider selection', () => {
     cfg.search.provider = 'auto';
     cfg.search.brave.apiKey = '';
     cfg.search.searxng.baseUrl = 'http://localhost:8080';
-    const svc = new SearchService(cfg, dummyAi);
+    const svc = new SearchService(cfg);
     expect(svc.getProvider()).toBe('searxng');
   });
 
@@ -68,14 +67,14 @@ describe('SearchService provider selection', () => {
     cfg.search.google.cx = '';
     cfg.search.bing.apiKey = '';
     cfg.search.presearch.apiUrl = '';
-    const svc = new SearchService(cfg, dummyAi);
+    const svc = new SearchService(cfg);
     expect(svc.getProvider()).toBe('searxng');
   });
 
   it('setProvider forces a specific provider', () => {
     const cfg = baseConfig();
     cfg.search.provider = 'auto';
-    const svc = new SearchService(cfg, dummyAi);
+    const svc = new SearchService(cfg);
     svc.setProvider('google');
     expect(svc.getProvider()).toBe('google');
   });
@@ -84,7 +83,7 @@ describe('SearchService provider selection', () => {
     const cfg = baseConfig();
     cfg.search.provider = 'auto';
     cfg.search.brave.apiKey = 'key';
-    const svc = new SearchService(cfg, dummyAi);
+    const svc = new SearchService(cfg);
     svc.setProvider('auto');
     expect(svc.getProvider()).toBe('brave');
   });
