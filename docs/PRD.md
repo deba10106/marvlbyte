@@ -1,7 +1,7 @@
 # Comet Browser — Product Requirements Document (PRD)
 
 - Version: 1.0
-- Last updated: 2025-08-28
+- Last updated: 2025-08-30
 
 ## 1. Product Vision
 
@@ -39,7 +39,7 @@ The goal is to create a modern, fast, and secure web browser that is AI-native, 
 ### 2.6 Comet-Parity Features (Planned)
 - Voice Assistant (Push-to-Talk) — Planned: Converse by voice; read page aloud; on-device STT/TTS preferred with cloud fallback. Microphone and audio permissions surfaced clearly.
 - @tab Cross-Tab Context — Planned: Mention `@tab` in prompts to include the content or metadata of selected open tabs so answers consider your current workspace.
-- Agentic Assistant (Web Actions) — Planned: The assistant can (with consent) click, scroll, fill forms, follow links, and open new tabs to complete tasks. Actions run step-by-step with preview, per-step approval, and a visible overlay.
+- Agent Mode (Web Actions) — Planned: The assistant can (with consent) click, scroll, fill forms, follow links, and open new tabs to complete tasks. Actions run step-by-step with preview, per-step approval, and a visible overlay.
 - Email & Calendar Integrations — Planned: Optional connectors (Gmail, Google Calendar) to summarize important emails, extract action items, and check availability. Disabled by default; least-privilege scopes; explicit write consent.
 - Assistant-Driven Tab Management — Planned: Summarize all open tabs, deduplicate, group by topic, and propose closures. One-click apply with undo.
 - Enterprise & Admin Controls — Planned: SSO/OIDC, policy controls (disable cloud AI, restrict actions, data residency), audit logs, and hardened sandboxing.
@@ -88,20 +88,86 @@ The AI Assistant Sidebar is the central hub for the browser's key differentiatin
 - As a student, I want to copy a complex paragraph from a scientific paper and ask the AI to "Explain this to me like I'm 10," so I can understand difficult concepts without getting overwhelmed.
 - As a writer, I want to select a few sentences on a blog post and tell the AI to "Rewrite this to be more professional," so I can use the content as a starting point for my own work.
 
-## 5. Feature Spec — Agentic Assistant (Planned)
+## 5. Feature Spec — Agent Mode (Browser Automation)
 
 ### 5.1 Overview
-- An opt-in assistant that can perform limited, auditable actions in the active page or new tabs to complete tasks (e.g., navigate, click, fill simple forms, follow links).
+- Agent Mode is an opt-in automation capability in the sidebar that plans and executes safe, auditable actions across one or more tabs to achieve user goals.
+- Primary goals: autonomous navigation, web scraping/semantic extraction, multi-tab swarms, deliverables generation, workflow automation, real-time monitoring/alerts, secure credential handling, and agent swarm collaboration.
 
-### 5.2 Guardrails & Safety
-- Clear consent UI: per-task and per-step approval; global kill-switch.
-- Visual overlay showing selected elements and upcoming actions; undo after each step.
-- Allowlist of safe actions; rate limits; timeouts; domain constraints; no credential autofill or arbitrary downloads.
-- Distinguish user instructions vs page content to resist prompt injection (inspired by Brave’s research). Sensitive actions require explicit confirmation.
+### 5.2 Scope & Non-Goals
+- In scope: navigation, clicking, typing, selecting, scrolling, pagination, basic file downloads with approval, multi-tab orchestration, content extraction, export to Markdown/PDF/DOCX/PPTX, scheduled/triggered runs, MCP tool integrations, and alerting.
+- Out of scope: unrestricted OS automation, arbitrary file system writes, background actions without clear consent, credential exfiltration, and extensions marketplace.
 
-### 5.3 User Stories
-- As a researcher, I want the assistant to open top results and extract key tables from each in new tabs.
-- As a shopper, I want it to navigate to a product page, toggle filters, and summarize pros/cons.
+### 5.3 Personas & Key User Stories
+- Research Analyst: “Open top 5 results, extract KPIs/tables, and generate a 10‑slide briefing (with sources).”
+- Financial Analyst: “Track competitor filings weekly, summarize changes, and export to DOCX for my team.”
+- Growth PM: “Scrape pricing pages, compare plans, and alert me on changes.”
+- QA Engineer: “Run scripted flows across staging/prod, capture screenshots, and file a Markdown report.”
+
+### 5.4 Capabilities & Prioritization
+- MVP (P0):
+  - Autonomous navigation with per-step approval overlay
+  - DOM actions: click, type, select, scroll, follow link, waitFor selector/text
+  - Content extraction via preload (text, tables, lists); Readability mode fallback
+  - Multi-tab open/switch/close; bounded tab swarm (up to N)
+  - Deliverables pipeline: Markdown report with citations; export to PDF
+  - Guardrails: domain scoping, rate limits/timeouts, global kill switch, audit log
+  - Secure credentials: encrypted vault; per-use consent (no autofill)
+
+- Phase 2 (P1):
+  - Pagination handling (next/prev/infinite scroll) and table scraping helpers
+  - Workflow automation: saved tasks, scheduled runs, on-demand re-run
+  - MCP tool integrations (e.g., GitHub, Notion, Google Drive exporters)
+  - Real-time monitors: page diffing, price/change alerts (sidebar + system notification)
+  - Deliverables: DOCX and PPTX exports with templates
+
+- Phase 3 (P2):
+  - Agent swarms: parallel tab teams with role prompts (Researcher, Extractor, Writer)
+  - Collaboration: share tasks and results (export/import JSON), reproducible runs
+  - Rich scraping: screenshot-to-text OCR helper, semantic extraction schemas (Zod)
+  - Advanced approvals: trust domains with auto-advance windows
+
+### 5.5 UX & Controls
+- Sidebar “Agent” tab with:
+  - Plan preview pane (steps with selectors, target URLs, and notes)
+  - Live run console (per-step logs, DOM highlights, data previews)
+  - Approvals: step-by-step confirm; optional auto-advance for trusted domains
+  - Status: progress bar, ETA, kill/pause/resume, and errors with retry
+- Results view: extract tables to CSV/Markdown, copy to clipboard, export via deliverables pipeline
+
+### 5.6 Security, Privacy, and Safety
+- Strict content/selector sandbox via preload; no arbitrary eval; IPC allowlist
+- Domain scoping (same-origin default); cross-domain requires explicit consent per run
+- No credential autofill; per-use token retrieval from encrypted vault; least privilege
+- Guardrails: rate limits, timeouts, and action caps; end-to-end audit log of actions/results
+- Prompt-injection hardening by separating user instructions from page content
+
+### 5.7 Acceptance Criteria (MVP)
+- Plan preview shows at least 5 common actions and requires user approval per step
+- Agent can navigate, click, type, scroll, follow link, and waitFor selectors reliably on 3 major sites
+- Extraction returns structured text and tables; Markdown report with citations exports to PDF
+- Multi-tab swarm opens up to N tabs and aggregates results deterministically
+- All actions logged with timestamp, URL, selector, and outcome; kill switch stops within 1s
+- Credentials (if configured) are stored encrypted and require per-use consent
+- Core bounded actions are exposed as tools (e.g., `browser.*`, `extract.*`, `deliverables.*`); each call is audit-logged with inputs/outputs and approvals.
+
+### 5.8 KPIs
+- Task success rate, average steps per task, median time to completion
+- Error rate (selector misses/timeouts), user overrides/aborts, deliverable exports/week
+
+### 5.9 Tool Surface (Agents as Tools)
+- Philosophy: bounded operations are exposed as tools for safety, auditability, and composability. Only planners/schedulers remain agents/services.
+- Tools (examples):
+  - Browser/DOM: `browser.navigate`, `browser.openTab`, `browser.closeTab`, `browser.back`, `browser.forward`, `browser.scroll`, `browser.click`, `browser.type`, `browser.select`, `browser.waitFor`, `browser.screenshot`, `browser.getHtml`
+  - Extraction/Selectors: `extract.text`, `extract.table`, `extract.list`, `extract.metadata`, `selector.find`
+  - Search: `search.brave`, `search.presearch`, `search.timpi`
+  - Deliverables: `deliverables.markdownToPdf`, `deliverables.markdownToDocx`, `deliverables.outlineToPptx`
+  - Data Ops: `data.dedupe`, `data.cluster`, `data.summarize`
+  - Credentials: `credentials.getSecret`, `credentials.signRequest` (with per-use consent)
+  - Monitoring Mgmt: `monitor.create`, `monitor.update`, `monitor.delete`, `monitor.list`, `monitor.runOnce`
+  - Connectors (via MCP): `notion.createPage`, `sheets.appendRows`, `slack.postMessage`, `github.createIssue`, `webhook.send`, `email.send`
+  - Artifacts/Storage: `artifact.write`, `artifact.read`, `artifact.list`
+- Keep as Agents/Services: `AgentOrchestrator` (planner/approvals), `SwarmCoordinator` (multi-tab), `MonitorService` (scheduler/worker), Guardrails/RateLimiter & Audit Logger.
 
 ## 6. Feature Spec — Voice Assistant (Planned)
 

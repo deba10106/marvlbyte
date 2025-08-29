@@ -1,7 +1,7 @@
 # Comet Browser — Technical Design (TD)
 
 - Version: 1.0
-- Last updated: 2025-08-28
+- Last updated: 2025-08-30
 
 ## 1. Technology Stack & Architecture
 
@@ -85,11 +85,24 @@
   2) For each referenced tab, preload extracts sanitized text and metadata; main aggregates into a bounded context package.
   3) `AiService` receives user prompt + structured tab contexts; prompts include tab titles and short content excerpts with IDs.
 
-- Agentic Assistant Actions (Planned):
-  1) User requests a task; `AgentOrchestrator` proposes a step plan (navigate/click/fill/scroll/newTab).
-  2) UI shows a step-by-step preview overlay; user approves each step (or toggles auto-advance within safe domains).
-  3) `ActionRunner` executes DOM actions in the active `BrowserView` via a constrained IPC API exposed by preload.
-  4) Results (DOM snapshots/text) stream back to the model to determine next steps until done/aborted.
+- Agent Mode Actions:
+  1) User requests a task; `AgentOrchestrator` drafts a step plan (navigate/click/type/select/scroll/newTab).
+  2) Approval: Sidebar shows step preview; user approves each step or enables auto-advance for trusted domains.
+  3) Execute: `ActionRunner` performs the step via preload API; UI overlay highlights targets.
+  4) Observe: `extract/snapshot/waitFor` capture DOM state; logs persisted to `agent_steps`.
+  5) Decide: Orchestrator updates plan based on observation; loop until done/killed/maxSteps.
+  6) Deliverables (optional): Collected extracts pass to Deliverables Pipeline for rendering/export.
+  7) Complete/Abort: Final status saved to `agent_runs`; artifacts indexed.
+
+- Monitoring & Alerts:
+  1) `MonitorService` loads monitor configs → schedules fetch/extract.
+  2) Compares current extract hash vs lastChangeHash; on diff, writes `alerts` and notifies renderer.
+  3) Optional: trigger an Agent task in response to alerts (e.g., re-scrape and summarize changes).
+
+- Credential Access Flow:
+  1) Agent requests a named secret; main prompts for per-use consent.
+  2) `CredentialVault` decrypts and returns an ephemeral token; never written to page storage.
+  3) Token used for a single HTTP/DOM operation; auto-purged on step completion/error.
 
 - Email & Calendar Connectors (Planned):
   1) User opts in and completes OAuth in a separate system browser window.
@@ -98,16 +111,19 @@
 
 ### 1.3 Security & Privacy
 
-- Secrets are never entered via UI; loaded from `config.yaml` and environment variables.
+- Secrets are never entered via UI; loaded from `config.yaml` and env.
 - IPC channels are whitelisted and validated; no arbitrary eval; content scripts run with strict CSP.
 - Decentralized search (Brave) used by default to align with privacy-first goals.
 
-- Agentic Safety (Planned):
+- Agent Mode Safety:
   - Separate user instructions from page content to mitigate indirect prompt injection (see Brave research on Comet).
-  - Per-step user approval UI; global kill switch; visible action overlay.
-  - Domain scoping (actions limited to originating domain unless approved), rate limits, and timeouts.
-  - No credential autofill, file downloads, or clipboard writes without explicit confirmation.
-  - Action allowlist (navigate, click, type, select, scroll, open tab) with constrained selectors.
+  - Per-step user approval UI; global kill switch (<1s); visible action overlay with target highlights.
+  - Domain scoping (same-origin default); explicit consent required for cross-domain hops.
+  - Selector allowlist and constrainted locator APIs (no arbitrary eval); retry policy with backoff.
+  - Rate limits, per-step and global timeouts; max steps per run.
+  - Strict credential handling: no autofill; per-use consent; ephemeral in-memory tokens.
+  - No clipboard writes/downloads without explicit user confirmation; sandbox export.
+  - End-to-end audit log for all actions and artifact creation.
 
 ### 1.4 Default Paths & Storage
 
@@ -120,6 +136,53 @@
   - `history(id, url, title, visitAt, visitCount)`
   - `documents(id, path, title, content, indexedAt, size, mime)`
   - FTS5 virtual tables: `history_fts(content)` and `documents_fts(content)` with triggers to keep in sync
+  - `agent_runs(id, taskId, startedAt, finishedAt, status, domainScope, killedAt?)`
+  - `agent_steps(id, runId, stepIndex, action, selector, url, status, durationMs, error?)`
+  - `agent_artifacts(id, runId, type, path, createdAt, meta)`
+  - `monitors(id, name, url, selector?, schedule, lastRunAt, lastChangeHash)`
+  - `alerts(id, monitorId, createdAt, type, message)`
+
+### 1.5 Agent Mode Architecture
+
+- Orchestrator-Executor Model:
+  - `AgentOrchestrator` holds the plan and state machine (Idle → Planning → WaitingApproval → Executing → Observing → Delivering → Done/Aborted).
+  - `ActionRunner` executes constrained DOM actions through a preload bridge.
+- Preload Bridge:
+  - Exposes a minimal, audited API: `query`, `click`, `type`, `select`, `scroll`, `waitFor`, `snapshot`, `extract`.
+  - No direct eval/injection; selectors resolved via `SelectorEngine` with safe heuristics.
+- Swarm & Tabs:
+  - `SwarmCoordinator` manages bounded parallelism across `BrowserView`s; per-agent role prompts.
+  - Shared context bus aggregates per-tab extracts into a structured scratchpad.
+- Deliverables Pipeline:
+  - Normalizes extracts to a document graph; renders MD → PDF/DOCX/PPTX via templates.
+- Monitoring:
+  - `MonitorService` schedules page fetch/extract/diff; emits `alerts` via system notifications and sidebar.
+- Credentials:
+  - `CredentialVault` stores secrets encrypted at rest; per-use consent and ephemeral memory usage.
+
+### 1.6 Tool Surface (Agents as Tools)
+
+- Philosophy: expose bounded, auditable operations as tools; keep planners/schedulers as agents/services.
+- Categories & examples (aligns with PRD §5.9):
+  - Browser/DOM: `browser.navigate`, `browser.openTab`, `browser.closeTab`, `browser.back`, `browser.forward`, `browser.scroll`, `browser.click`, `browser.type`, `browser.select`, `browser.waitFor`, `browser.screenshot`, `browser.getHtml`
+  - Extraction/Selectors: `extract.text`, `extract.table`, `extract.list`, `extract.metadata`, `selector.find`
+  - Search: `search.brave`, `search.presearch`, `search.timpi`
+  - Deliverables: `deliverables.markdownToPdf`, `deliverables.markdownToDocx`, `deliverables.outlineToPptx`
+  - Data Ops: `data.dedupe`, `data.cluster`, `data.summarize`
+  - Credentials: `credentials.getSecret`, `credentials.signRequest` (per-use consent)
+  - Monitoring Mgmt: `monitor.create`, `monitor.update`, `monitor.delete`, `monitor.list`, `monitor.runOnce`
+  - Connectors (via MCP): `notion.createPage`, `sheets.appendRows`, `slack.postMessage`, `github.createIssue`, `webhook.send`, `email.send`
+  - Artifacts/Storage: `artifact.write`, `artifact.read`, `artifact.list`
+- Tools Registry & Approvals:
+  - `ToolsRegistry` maps name→{ schema, handler, approvalLevel, rateLimit, redactionPolicy }.
+  - Inputs validated (e.g., Zod/JSON Schema). Per-tool approvals; defaults to per-step consent.
+  - `AuditLogger` records each call with inputs/outputs (secrets redacted), timestamps, URL/tab context, and outcome.
+- IPC/MCP Mapping:
+  - Browser/DOM/Extract → bridge to preload IPC endpoints.
+  - Search/Deliverables/Data Ops → internal services.
+  - Connectors → `MCPToolAdapter` with least-privilege scopes.
+- Limits:
+  - Per-tool timeouts/rate limits; global caps from `agent.actions` (maxSteps, rateLimitPerMinute).
 
 ## 2. Implementation Plan & Workflow
 
@@ -148,9 +211,10 @@
 - Phase 6: Voice & Cross-Tab Context (Planned)
   - Implement `VoiceService` (STT/TTS adapters), push-to-talk UI, and `@tab` context packaging.
 
-- Phase 7: Agentic Assistant & Connectors (Planned)
+- Phase 7: Agent Mode & Connectors (Planned)
   - Implement `AgentOrchestrator`, `ActionRunner`, approval overlays, guardrails.
   - Add Gmail/Calendar connectors (read-first; gated write flows).
+  - Expose Tool Surface: define registry (names, schemas, approvals), wire IPC handlers and MCP tool adapters, add per-tool audit logging.
 
 ## 3. Components
 
@@ -189,9 +253,30 @@
 - TabContextService (Planned)
   - Maintains metadata for open tabs; orchestrates content extraction for `@tab` references with size limits and deduplication.
 
-- AgentOrchestrator & ActionRunner (Planned)
-  - Converts model intents into an approved action plan; executes DOM-safe actions via preload bridge; collects results for iterative planning.
-  - Enforces guardrails: allowlist, scoping, rate limiting, and confirmations.
+- AgentOrchestrator & ActionRunner
+  - AgentOrchestrator: plan state machine, approvals, error handling, audit logging.
+  - ActionRunner: sandboxed DOM actions via preload; retries/backoff; timing & screenshot capture.
+- SelectorEngine
+  - Robust locator synthesis preferring stable attributes (role, name, data-*), text heuristics, and ARIA.
+  - Fallback strategies with safety caps; anti-exfiltration guard (no arbitrary selectors).
+- ExtractionService
+  - Structured extraction (text, tables, lists, metadata); Readability fallback; per-site adapters hook.
+- DeliverablesPipeline
+  - Renders Markdown → PDF/DOCX/PPTX; templates, citations, and artifact management.
+- CredentialVault
+  - Encrypted secrets at rest; per-use consent prompts; ephemeral in-memory handles.
+- MonitorService
+  - Scheduler + diff engine; writes `alerts`; debouncing and error backoff.
+- SwarmCoordinator
+  - Manages multi-tab parallel agents; role prompts; result aggregation & de-duplication.
+- MCPToolAdapter
+  - Bridges MCP tools (e.g., GitHub, Notion) into orchestrations with least-privilege scopes.
+
+- ToolsRegistry
+  - Central registry of tool definitions: name, schema, handler, approval level, rate limit, and redaction policy.
+  - Validates inputs, routes calls to preload IPC, internal services, or MCP adapters.
+- AuditLogger
+  - Structured audit trail for agent runs and tool calls; redacts secrets; persists to SQLite (`agent_runs`, `agent_steps`, `agent_artifacts`).
 
 - ConnectorService (Planned)
   - OAuth token storage (encrypted). Gmail/Calendar adapters with least-privilege scopes.
@@ -204,6 +289,14 @@
 - End-to-End (E2E) Testing: Playwright flows – instant summaries (local-first with Ollama), side-by-side comparisons, add/remove bookmark with persistence, history recording, omnibox suggestions, conversational search, sidebar actions.
 - Migration/Resilience: Verify SQLite schema migrations (no data loss) and corruption handling (auto-rebuild with backup). Validate FTS availability and degrade gracefully.
 - Privacy: Assert no network calls when configured for local-only operation (Ollama + local indexer), including tests with network intercepts.
+
+- Agent Mode QA:
+  - Plan preview and per-step approval; diff snapshots when plan changes.
+  - Selector resilience: simulate DOM changes; validate retries/backoff; ensure no arbitrary eval.
+  - Guardrails: domain scope violations blocked; rate limit/timeouts enforced; kill switch stops <1s.
+  - Credentials: no persistence; per-use consent required; secrets never leak to page storage.
+  - Monitors: deterministic diff detection; alert debouncing; notification content correctness.
+  - Tool Surface: per-tool audits (inputs/outputs), approvals recorded, secrets redacted; schema validation rejects malformed payloads; rate limits enforced.
 
 ## 5. API Integrations (AiService)
 
@@ -321,8 +414,8 @@ search:
     - presearch
     - timpi
   providers:
-  brave:
-    apiKey: ${BRAVE_SEARCH_API_KEY}
+    brave:
+      apiKey: ${BRAVE_SEARCH_API_KEY}
     presearch:
       apiKey: ${PRESEARCH_API_KEY}
       baseUrl: ${PRESEARCH_API_URL}
@@ -342,10 +435,48 @@ indexer:
 
 agent:  # Planned
   enabled: false
+  approvals:
+    perStep: true
+    autoAdvance:
+      enabled: false
+      trustedDomains: []
+      ttlSeconds: 900
   actions:
     domainScope: same-origin
-    allowAutoAdvance: false
     maxSteps: 10
+    rateLimitPerMinute: 30
+    timeouts:
+      defaultMs: 10000
+      navigationMs: 30000
+  swarm:
+    enabled: false
+    maxAgents: 4
+    roles: ["Researcher", "Extractor", "Writer"]
+  deliverables:
+    formats: ["md", "pdf", "docx", "pptx"]
+    templatesDir: ~/.config/comet/templates
+  monitors:
+    enabled: false
+    defaults:
+      schedule: "0 9 * * 1"  # weekly 9am Monday
+      notify: system
+  credentials:
+    vaultPath: ~/.config/comet/credentials.json
+    promptOnUse: true
+  tools:
+    enabled:
+      - browser.navigate
+      - browser.click
+      - extract.text
+      - deliverables.markdownToPdf
+    approval:
+      default: perStep
+      overrides:
+        credentials.getSecret: alwaysPrompt
+        monitor.create: alwaysPrompt
+    audit:
+      logInputs: true
+      redactKeys: ["Authorization", "apiKey", "password", "token"]
 
 connectors:  # Planned
   gmail:

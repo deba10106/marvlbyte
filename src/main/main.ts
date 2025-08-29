@@ -24,9 +24,29 @@ app.commandLine.appendSwitch('disable-features', 'UseChromeOSDirectVideoDecoder'
 // Store current theme for immediate application to new tabs
 let currentTheme = 'dark'; // Default theme
 
+// Some sites are sensitive to global CSS overrides. Bypass theming there.
+function shouldBypassTheming(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const h = (u.hostname || '').toLowerCase();
+    const bypassHosts = [
+      'youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com',
+      'studio.youtube.com',
+    ];
+    return bypassHosts.some((b) => h === b || h.endsWith('.' + b));
+  } catch {
+    return false;
+  }
+}
+
 // Helper function to apply theme CSS to webContents
 function applyThemeToWebContents(webContents: Electron.WebContents, themeName?: string) {
   if (!webContents || webContents.isDestroyed()) return;
+  // Avoid injecting global overrides on sensitive sites (e.g., YouTube)
+  try {
+    const url = webContents.getURL?.() || '';
+    if (url && shouldBypassTheming(url)) return;
+  } catch {}
   
   // Handle each theme type separately
   if (themeName === 'light') {
@@ -296,8 +316,6 @@ function createTab(initialUrl?: string) {
   // Hide native menu bar so our tabs strip can be visually on top
   try { mainWindow.setMenuBarVisibility(false); } catch {}
   try { mainWindow.setAutoHideMenuBar(true); } catch {}
-  try { mainWindow.on('ready-to-show', () => attachViewIfReady()); } catch {}
-  try { mainWindow.on('show', () => attachViewIfReady()); } catch {}
   const t = { id, view: v, title: 'New Tab', url: '' };
   tabs.push(t);
 
@@ -504,8 +522,22 @@ async function createWindow() {
       'taboola.com',
       'outbrain.com',
     ];
+    // Allowlist for resources YouTube legitimately needs (thumbnails, media, static)
+    const allowSubstrings = [
+      'ytimg.com',              // thumbnails/static
+      'i.ytimg.com',
+      'i9.ytimg.com',
+      'yt3.ggpht.com',
+      'googlevideo.com',        // media segments
+      '.googlevideo.com',       // any subdomain
+      'youtubei.googleapis.com',// API
+      'gstatic.com',            // static assets
+    ];
     session.defaultSession.webRequest.onBeforeRequest((details, cb) => {
       const url = details.url || '';
+      // Never block if URL matches allowlist
+      if (allowSubstrings.some((s) => url.includes(s))) return cb({});
+      // Otherwise block known ad/tracker URLs
       if (blockedSubstrings.some((s) => url.includes(s))) return cb({ cancel: true });
       cb({});
     });
