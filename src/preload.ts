@@ -8,16 +8,54 @@ export type LocalSearchResult =
   | { type: 'history'; url: string; title: string };
 export type SearchProvider = 'auto' | 'brave' | 'searxng' | 'google' | 'bing' | 'presearch';
 
+// Tool Playground shared types (duplicated locally for preload isolation)
+export type ToolEngine = 'http' | 'ai' | 'dom' | 'mcp' | 'render' | 'storage';
+export type ApprovalMode = 'auto' | 'manual' | 'disabled';
+export type ToolSchema = { type?: 'object'; required?: string[]; properties?: Record<string, any> };
+export type RedactionConfig = { inputPaths?: string[]; outputPaths?: string[] };
+export type HttpToolConfig = {
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: any;
+  allowedDomains: string[];
+  timeoutMs?: number;
+};
+export type AiToolConfig = { prompt: string; system?: string; provider?: string };
+export type DomToolConfig = { script: string; allowedDomains: string[]; timeoutMs?: number; readOnly?: boolean };
+export type ToolDefinition = {
+  id?: number;
+  name: string;
+  title?: string;
+  description?: string;
+  engine: ToolEngine;
+  schema?: ToolSchema;
+  config: HttpToolConfig | AiToolConfig | DomToolConfig | Record<string, any>;
+  approval?: ApprovalMode;
+  rateLimit?: number;
+  redaction?: RedactionConfig;
+  createdAt?: number;
+  updatedAt?: number;
+  // Internal form state fields (not persisted)
+  _rawSchema?: string;
+  _rawConfig?: string;
+  _rawRedaction?: string;
+};
+export type ToolExecutionResult =
+  | { ok: true; output: any; auditId: number }
+  | { ok: false; error: string; auditId?: number }
+  | { pendingApproval: true; auditId: number };
+
 export interface CometApi {
   // Direct access to ipcRenderer for theme-related messages
   ipcRenderer: {
     send: (channel: string, ...args: any[]) => void;
   };
-  navigate: (input: string) => Promise<void>;
-  goBack: () => Promise<void>;
-  goForward: () => Promise<void>;
-  reload: () => Promise<void>;
-  getUrl: () => Promise<string | undefined>;
+  navigate: (input: string, tabId?: string) => Promise<void>;
+  goBack: (tabId?: string) => Promise<void>;
+  goForward: (tabId?: string) => Promise<void>;
+  reload: (tabId?: string) => Promise<void>;
+  getUrl: (tabId?: string) => Promise<string | undefined>;
   onUrlChanged: (cb: (url: string) => void) => () => void;
   getSearchContext: () => Promise<{ query: string; results: BraveSearchResult[] } | undefined>;
   scrollToCitation: (n: number) => Promise<void>;
@@ -25,6 +63,7 @@ export interface CometApi {
   toggleReader: () => Promise<void>;
   viewSetVisible: (visible: boolean) => Promise<void>;
   openDevTools: () => Promise<void>;
+  inspectElement: (tabId: string) => Promise<void>;
   searchWeb: (query: string) => Promise<BraveSearchResponse>;
   searchBrave: (query: string) => Promise<BraveSearchResponse>;
   searchLocal: (query: string) => Promise<LocalSearchResult[]>;
@@ -89,6 +128,11 @@ export interface CometApi {
     onUpdated: (cb: (tabs: Array<{ id: string; title: string; url: string; active: boolean }>) => void) => () => void;
     onActiveChanged: (cb: (e: { id: string; url: string; title: string }) => void) => () => void;
   };
+  
+  // Browser control APIs
+  refresh: (tabId?: string) => Promise<void>;
+  executeScript: (script: string, tabId?: string) => Promise<any>;
+  getCurrentURL: (tabId?: string) => Promise<string>;
 }
 
 const api: CometApi = {
@@ -96,11 +140,11 @@ const api: CometApi = {
   ipcRenderer: {
     send: (channel: string, ...args: any[]) => ipcRenderer.send(channel, ...args),
   },
-  navigate: (input: string) => ipcRenderer.invoke('omnibox:navigate', input),
-  goBack: () => ipcRenderer.invoke('nav:back'),
-  goForward: () => ipcRenderer.invoke('nav:forward'),
-  reload: () => ipcRenderer.invoke('nav:reload'),
-  getUrl: () => ipcRenderer.invoke('tab:get-url'),
+  navigate: (input: string, tabId?: string) => ipcRenderer.invoke('omnibox:navigate', { url: input, tabId }),
+  goBack: (tabId?: string) => ipcRenderer.invoke('nav:back', { tabId }),
+  goForward: (tabId?: string) => ipcRenderer.invoke('nav:forward', { tabId }),
+  reload: (tabId?: string) => ipcRenderer.invoke('nav:reload', { tabId }),
+  getUrl: (tabId?: string) => ipcRenderer.invoke('tab:get-url', { tabId }),
   onUrlChanged: (cb) => {
     const handler = (_: unknown, url: string) => {
       try { cb(url); } catch {}
@@ -108,8 +152,11 @@ const api: CometApi = {
     ipcRenderer.on('tab:url-changed', handler);
     return () => ipcRenderer.removeListener('tab:url-changed', handler);
   },
-  print: () => ipcRenderer.invoke('tab:print'),
-  printToPDF: () => ipcRenderer.invoke('tab:print-to-pdf'),
+  print: (tabId?: string) => ipcRenderer.invoke('tab:print', { tabId }),
+  printToPDF: (tabId?: string) => ipcRenderer.invoke('tab:print-to-pdf', { tabId }),
+  refresh: (tabId?: string) => ipcRenderer.invoke('tab:reload', { tabId }),
+  executeScript: (script: string, tabId?: string) => ipcRenderer.invoke('tab:execute-script', { script, tabId }),
+  getCurrentURL: (tabId?: string) => ipcRenderer.invoke('tab:get-url', { tabId }),
   privacy: {
     clearBrowsingData: (opts) => ipcRenderer.invoke('privacy:clear-browsing-data', opts || {}),
   },
@@ -164,7 +211,8 @@ const api: CometApi = {
   setLayout: (layout: { top: number; rightSidebarWidth: number }) => ipcRenderer.invoke('layout:set', layout),
   toggleReader: () => ipcRenderer.invoke('reader:toggle'),
   viewSetVisible: (visible: boolean) => ipcRenderer.invoke('view:set-visible', !!visible),
-  openDevTools: () => ipcRenderer.invoke('devtools:open'),
+  openDevTools: () => ipcRenderer.invoke('open-dev-tools'),
+  inspectElement: (tabId: string) => ipcRenderer.invoke('inspect-element', tabId),
   searchWeb: (query: string) => ipcRenderer.invoke('search:web', query),
   // alias for backward compatibility
   searchBrave: (query: string) => ipcRenderer.invoke('search:web', query),
@@ -209,7 +257,47 @@ const api: CometApi = {
   },
 };
 
-contextBridge.exposeInMainWorld('comet', api);
+// Expose DOM and Semantic utilities
+const domUtils = {
+  extractElement: (selector: string, attributes?: string[]) => 
+    ipcRenderer.invoke('dom:extractElement', { selector, attributes }),
+  
+  extractTable: (selector: string, options?: any) => 
+    ipcRenderer.invoke('dom:extractTable', { selector, options }),
+    
+  extractImages: (selector?: string, options?: any) => 
+    ipcRenderer.invoke('dom:extractImages', { selector, options }),
+    
+  extractLinks: (selector?: string, options?: any) => 
+    ipcRenderer.invoke('dom:extractLinks', { selector, options }),
+    
+  extractMeta: (options?: any) => 
+    ipcRenderer.invoke('dom:extractMeta', { options })
+};
+
+const semanticUtils = {
+  extract: (content: string, options?: any) => 
+    ipcRenderer.invoke('semantic:extract', { content, options }),
+    
+  summarize: (options?: any) => 
+    ipcRenderer.invoke('semantic:summarize', { options }),
+    
+  recognizeEntities: (options?: any) => 
+    ipcRenderer.invoke('semantic:recognizeEntities', { options }),
+    
+  classify: (options: any) => 
+    ipcRenderer.invoke('semantic:classify', { options }),
+    
+  extractSemanticTable: (options: any) => 
+    ipcRenderer.invoke('semantic:extractSemanticTable', { options })
+};
+
+// Expose both the main API and the utilities
+contextBridge.exposeInMainWorld('comet', {
+  ...api,
+  dom: domUtils,
+  semantic: semanticUtils
+});
 
 declare global {
   interface Window {

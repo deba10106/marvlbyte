@@ -130,6 +130,38 @@ function initSchema(db: Database.Database) {
       UNIQUE(origin, username)
     );
     CREATE INDEX IF NOT EXISTS idx_logins_origin ON logins(origin);
+    
+    -- Tool registry
+    CREATE TABLE IF NOT EXISTS tool_definitions (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      title TEXT,
+      description TEXT,
+      engine TEXT NOT NULL,
+      schema TEXT,
+      config TEXT,
+      approval TEXT NOT NULL DEFAULT 'auto',
+      rateLimit INTEGER,
+      redaction TEXT,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_tool_definitions_name ON tool_definitions(name);
+
+    -- Tool audit logs
+    CREATE TABLE IF NOT EXISTS tool_audit (
+      id INTEGER PRIMARY KEY,
+      toolName TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      input TEXT,
+      output TEXT,
+      approved INTEGER NOT NULL DEFAULT 1,
+      error TEXT,
+      durationMs INTEGER,
+      redacted INTEGER NOT NULL DEFAULT 0,
+      caller TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tool_audit_toolName_ts ON tool_audit(toolName, ts);
   `);
 }
 

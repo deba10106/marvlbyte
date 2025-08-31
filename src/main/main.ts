@@ -1,6 +1,8 @@
 import { app, BrowserWindow, BrowserView, ipcMain, session, shell, Menu, nativeTheme } from 'electron';
-import { EventEmitter } from 'events';
 import type { IpcMainInvokeEvent, Event as ElectronEvent } from 'electron';
+import { EventEmitter } from 'events';
+import { DOMUtils } from './dom-utils';
+import { SemanticUtils } from './semantic-utils';
 import path from 'path';
 
 import { loadConfig, ensureConfigDir, AppConfig, saveConfig } from './services/config';
@@ -14,7 +16,7 @@ import { ImportService } from './services/import';
 import type { ImportRunOptions } from './services/import';
 
 // Increase the default max listeners to prevent MaxListenersExceededWarning
-EventEmitter.defaultMaxListeners = 20;
+EventEmitter.defaultMaxListeners = 30; // Increased from 20 to handle more listeners
 
 // Configure app for media handling to fix ffmpeg errors
 app.commandLine.appendSwitch('ignore-gpu-blacklist');
@@ -200,7 +202,14 @@ if (process.env.NODE_ENV !== 'production') {
 // Attach active BrowserView to the window if the renderer is ready
 function attachViewIfReady() {
   try {
-    if (!mainWindow || !view) return;
+    if (!mainWindow) return;
+    // Do not attach the BrowserView when the active tab is a special in-app page (about:*)
+    const active = getActiveTab();
+    if (active && typeof active.url === 'string' && active.url.startsWith('about:')) {
+      try { mainWindow.setBrowserView(null as any); } catch {}
+      return;
+    }
+    if (!view) return;
     const wc = mainWindow.webContents;
     if (!wc || wc.isDestroyed()) return;
     if (typeof wc.isLoadingMainFrame === 'function' && wc.isLoadingMainFrame()) return;
@@ -270,7 +279,13 @@ function activateTab(id: string) {
 }
 
 function createTab(initialUrl?: string) {
-  if (!mainWindow) return null;
+  // Handle special URLs
+  let isSpecialUrl = false;
+  if (initialUrl && initialUrl.startsWith('about:')) {
+    isSpecialUrl = true;
+    // For special URLs, we'll let the renderer handle them with special components
+  }
+  
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const v = new BrowserView({
     webPreferences: {
@@ -314,8 +329,8 @@ function createTab(initialUrl?: string) {
     v.setBackgroundColor('#09090b'); // Default to dark theme background
   } catch {}
   // Hide native menu bar so our tabs strip can be visually on top
-  try { mainWindow.setMenuBarVisibility(false); } catch {}
-  try { mainWindow.setAutoHideMenuBar(true); } catch {}
+  try { mainWindow?.setMenuBarVisibility(false); } catch {}
+  try { mainWindow?.setAutoHideMenuBar(true); } catch {}
   const t = { id, view: v, title: 'New Tab', url: '' };
   tabs.push(t);
 
@@ -421,16 +436,31 @@ function createTab(initialUrl?: string) {
   // Load start page or URL
   (async () => {
     try {
-      if (initialUrl && initialUrl.trim()) await v.webContents.loadURL(initialUrl);
+      if (initialUrl && initialUrl.trim()) {
+        // Handle special URLs differently
+        if (initialUrl.startsWith('about:')) {
+          // For about: URLs, we'll just set the tab URL but not actually load it in the BrowserView
+          // The renderer will detect this and show appropriate content
+          t.url = initialUrl;
+          // Send URL changed event immediately
+          sendRenderer('tabs:updated', listTabs());
+          sendRenderer('tab:url-changed', initialUrl);
+        } else {
+          // Regular URLs load normally
+          await v.webContents.loadURL(initialUrl);
+        }
+      }
       else await v.webContents.loadURL('https://example.com');
     } catch {}
   })();
 
   // Ensure the active view is attached once the renderer UI is ready
   try {
-    const wc = mainWindow.webContents;
-    wc.on('did-finish-load', () => attachViewIfReady());
-    wc.on('dom-ready', () => attachViewIfReady());
+    if (mainWindow) {
+      const wc = mainWindow.webContents;
+      wc.on('did-finish-load', () => attachViewIfReady());
+      wc.on('dom-ready', () => attachViewIfReady());
+    }
   } catch {}
   // Also schedule a couple of delayed attempts to cover race conditions
   try { setTimeout(() => attachViewIfReady(), 50); } catch {}
@@ -571,7 +601,18 @@ async function createWindow() {
         { label: 'Reset Zoom', accelerator: 'Ctrl+0', click: () => view && view.webContents.setZoomLevel(0) },
         { type: 'separator' },
         { role: 'togglefullscreen' },
-        { label: 'Toggle DevTools', accelerator: 'Ctrl+Shift+I', click: () => (view ? view.webContents.openDevTools({ mode: 'right' }) : mainWindow?.webContents.openDevTools({ mode: 'right' })) },
+        { label: 'Toggle DevTools', accelerator: 'Ctrl+Shift+I', click: () => {
+            try {
+              const active = getActiveTab();
+              if (active && typeof active.url === 'string' && active.url.startsWith('about:')) {
+                mainWindow?.webContents.openDevTools({ mode: 'right' });
+              } else if (view) {
+                view.webContents.openDevTools({ mode: 'right' });
+              } else {
+                mainWindow?.webContents.openDevTools({ mode: 'right' });
+              }
+            } catch {}
+          } },
       ],
     },
   ];
@@ -613,6 +654,21 @@ async function createWindow() {
     show: false,
   });
   
+  // Context menu for renderer window (enables Inspect Element on special pages like Tool Playground)
+  try {
+    mainWindow.webContents.on('context-menu', (_e, params) => {
+      const menu = Menu.buildFromTemplate([
+        { role: 'cut', enabled: params.editFlags.canCut },
+        { role: 'copy', enabled: params.editFlags.canCopy },
+        { role: 'paste', enabled: params.editFlags.canPaste },
+        { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Inspect Element', click: () => mainWindow?.webContents.inspectElement(params.x, params.y) },
+      ]);
+      menu.popup({ window: mainWindow! });
+    });
+  } catch {}
+
   // Using the currentTheme variable defined at the top of the file
 
   // Reader mode (basic)
@@ -651,7 +707,7 @@ async function createWindow() {
         })()`);
         } catch {}
         if (!pageText) {
-          try { pageText = await view.webContents.executeJavaScript('(document && document.body && (document.body.innerText || document.body.textContent)) || ""'); } catch {}
+          try { pageText = await view.webContents.executeJavaScript('(document && document.body && document.body.innerText) || ""'); } catch {}
         }
         const safe = (s: any) => String(s ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const html = `<!doctype html><html><head><meta charset="utf-8" /><title>${safe(title)}</title>
@@ -756,6 +812,27 @@ async function createWindow() {
       else if (view) view.webContents.openDevTools({ mode: 'right' });
     } catch {}
   });
+
+  // Handle element inspection for a specific tab
+  ipcMain.handle('inspect-element', async (_event, tabId: string) => {
+    try {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) throw new Error(`Tab ${tabId} not found`);
+      
+      // Enable DevTools if not already open
+      if (!tab.view.webContents.isDevToolsOpened()) {
+        tab.view.webContents.openDevTools({ mode: 'right' });
+      }
+      
+      // Toggle inspect element mode
+      tab.view.webContents.inspectElement(0, 0);
+    } catch (error) {
+      console.error('Error in inspect-element handler:', error);
+      throw error;
+    }
+  });
+  
+  // Tool Playground IPC handlers removed - using alternative implementation
   // Fallback URL builder for provider HTML pages
   function buildFallbackSearchUrl(q: string): string {
     const enc = encodeURIComponent(q);
@@ -771,15 +848,27 @@ async function createWindow() {
     return `https://duckduckgo.com/?q=${enc}`;
   }
 
-  ipcMain.handle('omnibox:navigate', async (_ev: IpcMainInvokeEvent, input: string) => {
-    if (!view) return;
-    const s = (input || '').trim();
-    if (!s) return;
+  ipcMain.handle('omnibox:navigate', async (_ev: IpcMainInvokeEvent, { url: input, tabId }: { url: string, tabId?: string }) => {
     try {
+      const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+      if (!targetView) throw new Error(`Tab ${tabId || 'active'} not found`);
+      
+      const s = (input || '').trim();
+      if (!s) return { url: '', tabId };
+      
       if (isUrl(s)) {
         const url = s.includes('://') ? s : `https://${s}`; // prefer HTTPS for bare hosts
-        await view.webContents.loadURL(url);
-        return;
+        await targetView.webContents.loadURL(url);
+        
+        // Update the tab's URL in our records
+        const tab = tabs.find(t => t.view === targetView);
+        if (tab) {
+          tab.url = url;
+          tab.title = targetView.webContents.getTitle();
+        }
+        
+        sendRenderer('tab:url-changed', url);
+        return { url, tabId: tab?.id };
       }
       // Build in-app search results page with summary & citations
       try {
@@ -837,16 +926,39 @@ async function createWindow() {
             window.__COMET_SEARCH_CONTEXT = JSON.parse('${ctx}');
           </script>
         </body></html>`;
-        await view.webContents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-        // Broadcast canonical search URL for the internal results page
-        sendRenderer('tab:url-changed', `comet:search?q=${encodeURIComponent(s)}`);
-      } catch (err) {
-        // Fallback to provider-hosted HTML search if API/summary fails
-        const targetUrl = buildFallbackSearchUrl(s);
-        if (targetUrl) {
-          await view.webContents.loadURL(targetUrl);
-          sendRenderer('tab:url-changed', targetUrl);
+        await targetView.webContents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+        
+        // Update the tab's URL in our records
+        const searchTab = tabs.find(t => t.view === targetView);
+        const searchUrl = `comet:search?q=${encodeURIComponent(s)}`;
+        
+        if (searchTab) {
+          searchTab.url = searchUrl;
+          searchTab.title = `Search: ${s}`;
         }
+        
+        // Broadcast canonical search URL for the internal results page
+        sendRenderer('tab:url-changed', searchUrl);
+        
+        return { url: searchUrl, tabId: searchTab?.id };
+      } catch (searchErr) {
+        console.error('Search failed:', searchErr);
+        // Fallback to provider-hosted HTML search if API/summary fails
+        const fallbackUrl = buildFallbackSearchUrl(s);
+        if (fallbackUrl) {
+          await targetView.webContents.loadURL(fallbackUrl);
+          
+          // Update the tab's URL in our records
+          const fallbackTab = tabs.find(t => t.view === targetView);
+          if (fallbackTab) {
+            fallbackTab.url = fallbackUrl;
+            fallbackTab.title = targetView.webContents.getTitle();
+          }
+          
+          sendRenderer('tab:url-changed', fallbackUrl);
+          return { url: fallbackUrl, tabId: fallbackTab?.id };
+        }
+        throw searchErr; // Re-throw if we couldn't handle the fallback
       }
     } catch (err) {
       // Avoid silent failures
@@ -854,9 +966,23 @@ async function createWindow() {
     }
   });
 
-  ipcMain.handle('nav:back', async () => view?.webContents.goBack());
-  ipcMain.handle('nav:forward', async () => view?.webContents.goForward());
-  ipcMain.handle('nav:reload', async () => view?.webContents.reload());
+  ipcMain.handle('tab:back', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string } = {}) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    await targetView?.webContents.goBack();
+    return `Navigated back in tab ${tabId || 'active'}`;
+  });
+
+  ipcMain.handle('tab:forward', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string } = {}) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    await targetView?.webContents.goForward();
+    return `Navigated forward in tab ${tabId || 'active'}`;
+  });
+
+  ipcMain.handle('tab:reload', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string } = {}) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    await targetView?.webContents.reload();
+    return `Reloaded tab ${tabId || 'active'}`;
+  });
   // Tabs IPC
   ipcMain.handle('tabs:create', async (_e: IpcMainInvokeEvent, url?: string) => { const t = createTab(url); return t ? { id: t.id } : undefined; });
   ipcMain.handle('tabs:list', async () => listTabs());
@@ -875,6 +1001,30 @@ async function createWindow() {
     sendRenderer('find:result', result);
   });
   // Core: Zoom controls
+  ipcMain.handle('tab:get-url', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string } = {}) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    if (!targetView) return undefined;
+    
+    try {
+      // Check if this is a search page
+      const isSearch = await targetView.webContents.executeJavaScript('window.__COMET_IS_SEARCH_PAGE || false');
+      if (isSearch) {
+        const q = await targetView.webContents.executeJavaScript('window.__COMET_SEARCH_CONTEXT && window.__COMET_SEARCH_CONTEXT.query');
+        if (q) return `comet:search?q=${encodeURIComponent(q)}`;
+      }
+      return targetView.webContents.getURL();
+    } catch (e) {
+      console.error('Error getting URL:', e);
+      return targetView.webContents.getURL();
+    }
+  });
+
+  ipcMain.handle('tab:execute-script', async (_e: IpcMainInvokeEvent, { script, tabId }: { script: string, tabId?: string }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    if (!targetView) throw new Error(`Tab ${tabId || 'active'} not found`);
+    return targetView.webContents.executeJavaScript(script);
+  });
+
   ipcMain.handle('zoom:get', async () => (view ? view.webContents.getZoomLevel() : 0));
   ipcMain.handle('zoom:set', async (_e: IpcMainInvokeEvent, level: number) => { if (view && Number.isFinite(level)) view.webContents.setZoomLevel(level); return view?.webContents.getZoomLevel(); });
   ipcMain.handle('zoom:reset', async () => { if (view) view.webContents.setZoomLevel(0); return view?.webContents.getZoomLevel(); });
@@ -894,6 +1044,58 @@ async function createWindow() {
     } catch {}
     return true;
   });
+  // DOM Parsing APIs
+  ipcMain.handle('dom:extract-element', async (_e: IpcMainInvokeEvent, { tabId, selector, options }: { tabId?: string, selector: string, options?: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return DOMUtils.extractElement(targetView, selector, options);
+  });
+
+  ipcMain.handle('dom:extract-table', async (_e: IpcMainInvokeEvent, { tabId, selector, options }: { tabId?: string, selector: string, options?: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return DOMUtils.extractTable(targetView, selector, options);
+  });
+
+  ipcMain.handle('dom:extract-images', async (_e: IpcMainInvokeEvent, { tabId, selector, options }: { tabId?: string, selector?: string, options?: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return DOMUtils.extractImages(targetView, selector, options);
+  });
+
+  ipcMain.handle('dom:extract-links', async (_e: IpcMainInvokeEvent, { tabId, selector, options }: { tabId?: string, selector?: string, options?: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return DOMUtils.extractLinks(targetView, selector, options);
+  });
+
+  ipcMain.handle('dom:extract-meta', async (_e: IpcMainInvokeEvent, { tabId, options }: { tabId?: string, options?: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return DOMUtils.extractMeta(targetView, options);
+  });
+
+  // Semantic Extraction APIs
+  ipcMain.handle('semantic:extract', async (_e: IpcMainInvokeEvent, { tabId, options }: { tabId?: string, options: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return SemanticUtils.semanticExtract(targetView, options);
+  });
+
+  ipcMain.handle('semantic:summarize', async (_e: IpcMainInvokeEvent, { tabId, options }: { tabId?: string, options?: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return SemanticUtils.summarize(targetView, options);
+  });
+
+  ipcMain.handle('semantic:recognize-entities', async (_e: IpcMainInvokeEvent, { tabId, options }: { tabId?: string, options?: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return SemanticUtils.recognizeEntities(targetView, options);
+  });
+
+  ipcMain.handle('semantic:classify', async (_e: IpcMainInvokeEvent, { tabId, options }: { tabId?: string, options: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return SemanticUtils.classify(targetView, options);
+  });
+
+  ipcMain.handle('semantic:extract-table', async (_e: IpcMainInvokeEvent, { tabId, options }: { tabId?: string, options: any }) => {
+    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
+    return SemanticUtils.extractSemanticTable(targetView, options);
+  });
+
   // Core: Print and PDF
   ipcMain.handle('tab:print', async () => { if (!view) return; try { view.webContents.print({}); } catch {} });
   ipcMain.handle('tab:print-to-pdf', async () => {
@@ -908,17 +1110,6 @@ async function createWindow() {
     } catch (e) {
       return undefined;
     }
-  });
-  ipcMain.handle('tab:get-url', async () => {
-    if (!view) return undefined;
-    try {
-      const isSearch = await view.webContents.executeJavaScript('!!window.__COMET_IS_SEARCH_PAGE');
-      if (isSearch) {
-        const q = await view.webContents.executeJavaScript('window.__COMET_SEARCH_CONTEXT && window.__COMET_SEARCH_CONTEXT.query');
-        if (q) return `comet:search?q=${encodeURIComponent(q)}`;
-      }
-    } catch {}
-    return view.webContents.getURL();
   });
 
   // Expose current in-app search context to the renderer (used for citation navigation)

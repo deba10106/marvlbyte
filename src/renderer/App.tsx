@@ -3,7 +3,34 @@ import { ImportWizard } from './components/ImportWizard';
 import { ThemeSelector } from './components/theme-selector';
 import { useTheme } from './components/theme-provider';
 import { Button } from './components/ui/button';
-import { Moon, Sun, ArrowLeft, ArrowRight, RefreshCw, BookmarkIcon, Import, PanelRightClose, PanelRightOpen, BookOpen } from 'lucide-react';
+import { ToolPlayground } from './components/ToolPlayground';
+import { 
+  Moon, 
+  Sun, 
+  ArrowLeft, 
+  ArrowRight, 
+  RefreshCw, 
+  Import, 
+  PanelRightClose, 
+  PanelRightOpen, 
+  BookOpen,
+  Settings,
+  History,
+  User,
+  Download,
+  Key,
+  Cookie,
+  Database,
+  Sparkles
+} from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu';
 
 export function App() {
   const { theme } = useTheme();
@@ -210,6 +237,51 @@ export function App() {
     }
   }, [theme]);
 
+  // Tool Playground is now opened in a new browser tab instead of an overlay page
+
+  // Check if current URL is a special URL that should render a different component
+  const isToolPlaygroundUrl = currentUrl.startsWith('about:tool-playground');
+  
+  // Ensure the BrowserView does not intercept clicks when rendering special content (Tool Playground)
+  useEffect(() => {
+    (async () => {
+      try {
+        if (isToolPlaygroundUrl) {
+          await window.comet.viewSetVisible(false);
+        } else {
+          await window.comet.viewSetVisible(true);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [isToolPlaygroundUrl]);
+  
+  // Render special page content instead of browser view when matching special URLs
+  const renderSpecialContent = () => {
+    if (isToolPlaygroundUrl) {
+      return (
+        <div className="h-screen w-screen bg-background text-foreground">
+          <div className="container mx-auto pt-24 px-4 pb-16">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className="text-2xl font-bold">Browser Control Playground</h1>
+                <p className="text-muted-foreground">Test browser automation APIs and build agent workflows</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => window.comet.openDevTools()}>
+                  Open DevTools
+                </Button>
+              </div>
+            </div>
+            <ToolPlayground />
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="h-screen w-screen bg-background text-foreground">
       {/* Tabs strip (topmost) */}
@@ -267,15 +339,60 @@ export function App() {
           <Button variant="outline" size="sm" onClick={() => window.comet.toggleReader()} title="Reader mode">
             <BookOpen className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm" onClick={toggleBookmark} title="Bookmark">
-            <BookmarkIcon className="h-4 w-4" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" title="Settings">
+                <Settings className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Browser Settings</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => window.alert('History page not implemented')}>
+                <History className="mr-2 h-4 w-4" />
+                <span>History</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.alert('Profile page not implemented')}>
+                <User className="mr-2 h-4 w-4" />
+                <span>Profile</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.alert('Downloads page not implemented')}>
+                <Download className="mr-2 h-4 w-4" />
+                <span>Downloads</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Security</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => window.alert('Passwords page not implemented')}>
+                <Key className="mr-2 h-4 w-4" />
+                <span>Passwords</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.alert('Cookies page not implemented')}>
+                <Cookie className="mr-2 h-4 w-4" />
+                <span>Cookies</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.alert('Sessions page not implemented')}>
+                <Database className="mr-2 h-4 w-4" />
+                <span>Sessions</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>AI Tools</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => window.comet.tabs.create('about:tool-playground')}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                <span>AI Playground</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <ThemeSelector />
         </div>
       </div>
 
-      {/* Right sidebar (clickable area not covered by BrowserView) */}
-      {!sidebarCollapsed && (
+      {/* Special URL content */}
+      {isToolPlaygroundUrl && renderSpecialContent()}
+      
+      {/* Hide browser view content when showing special URLs */}
+      {!isToolPlaygroundUrl && (
+        <>
+          {/* Right sidebar (clickable area not covered by BrowserView) */}
+          {!sidebarCollapsed && (
         <div className="fixed top-24 right-0 bottom-8" style={{ width: SIDEBAR_WIDTH }}>
           <div className="relative h-full w-full border-l bg-background">
             {/* Scrollable content area with bottom padding for input bar */}
@@ -314,58 +431,99 @@ export function App() {
                   <label className="flex items-center gap-1"><input type="radio" checked={sideMode==='agent'} onChange={() => setSideMode('agent')} /> Agent</label>
                 </div>
 
-                {/* Chat transcript */}
-                {chatMessages.length ? (
-                  <div className="grid gap-2">
-                    {chatMessages.map((m, i) => (
-                      <div
-                        key={i}
-                        className={`text-sm p-3 rounded border ${m.role === 'assistant' ? 'bg-accent/20 border-accent' : 'bg-card border-border'}`}
-                        {...(m.role === 'assistant' ? { dangerouslySetInnerHTML: { __html: renderAssistantHtml(m.content) } } : {})}
-                        onClick={async (e) => {
-                          const t = e.target as HTMLElement | null;
-                          const cite = t && t.getAttribute && t.getAttribute('data-cite');
-                          if (cite) {
-                            e.preventDefault();
-                            const n = parseInt(cite, 10);
-                            if (Number.isFinite(n)) {
-                              try {
-                                const ctx = await window.comet.getSearchContext();
-                                const targetUrl = ctx && Array.isArray(ctx.results) ? ctx.results[n - 1]?.url : undefined;
-                                if (targetUrl) {
-                                  await window.comet.navigate(targetUrl);
-                                } else {
-                                  await window.comet.scrollToCitation(n);
+                {/* Side content: Chat vs Agent */}
+                {sideMode === 'chat' ? (
+                  <>
+                  {/* Chat transcript */}
+                  {chatMessages.length ? (
+                    <div className="grid gap-2">
+                      {chatMessages.map((m, i) => (
+                        <div
+                          key={i}
+                          className={`text-sm p-3 rounded border ${m.role === 'assistant' ? 'bg-accent/20 border-accent' : 'bg-card border-border'}`}
+                          {...(m.role === 'assistant' ? { dangerouslySetInnerHTML: { __html: renderAssistantHtml(m.content) } } : {})}
+                          onClick={async (e) => {
+                            const t = e.target as HTMLElement | null;
+                            const cite = t && t.getAttribute && t.getAttribute('data-cite');
+                            if (cite) {
+                              e.preventDefault();
+                              const n = parseInt(cite, 10);
+                              if (Number.isFinite(n)) {
+                                try {
+                                  const ctx = await window.comet.getSearchContext();
+                                  const targetUrl = ctx && Array.isArray(ctx.results) ? ctx.results[n - 1]?.url : undefined;
+                                  if (targetUrl) {
+                                    await window.comet.navigate(targetUrl);
+                                  } else {
+                                    await window.comet.scrollToCitation(n);
+                                  }
+                                } catch {
+                                  try { await window.comet.scrollToCitation(n); } catch {}
                                 }
-                              } catch {
-                                try { await window.comet.scrollToCitation(n); } catch {}
                               }
                             }
-                          }
-                        }}
-                      >
-                        {m.role === 'user' ? <div>{m.content}</div> : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
+                          }}
+                        >
+                          {m.role === 'user' ? <div>{m.content}</div> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
 
-                {/* Removed response mode dropdown to simplify UI */}
-                <input
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitChat(); } }}
-                  className="flex-1 px-3 py-2 rounded border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  placeholder={sideMode === 'agent' ? 'Ask the Agent' : 'Ask the AI assistant'}
-                />
-                <label className="text-xs text-foreground flex items-center gap-1">
-                  <input type="checkbox" checked={includePage} onChange={(e) => setIncludePage(e.target.checked)} /> include page
-                </label>
-                <Button onClick={submitChat} disabled={busy} variant="default">Ask</Button>
+                  {/* Chat input */}
+                  <input
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitChat(); } }}
+                    className="flex-1 px-3 py-2 rounded border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                    placeholder={'Ask the AI assistant'}
+                  />
+                  <label className="text-xs text-foreground flex items-center gap-1">
+                    <input type="checkbox" checked={includePage} onChange={(e) => setIncludePage(e.target.checked)} /> include page
+                  </label>
+                  <Button onClick={submitChat} disabled={busy} variant="default">Ask</Button>
+                </>
+                ) : (
+                  <>
+                    {/* Agent workflow results/logs and inputs */}
+                    <div className="grid gap-3">
+                      <div className="p-3 rounded border border-border bg-card">
+                        <h3 className="text-sm font-medium mb-2">Agent Workflow</h3>
+                        <p className="text-xs text-muted-foreground mb-3">Interact with agent workflows. Tool Playground is now available in Settings → AI Playground.</p>
+                        
+                        {/* Agent logs will appear here */}
+                        <div className="bg-muted/30 rounded p-2 mb-3 text-xs h-32 overflow-auto">
+                          <div className="text-muted-foreground italic">Agent logs will appear here...</div>
+                        </div>
+                        
+                        {/* Agent input */}
+                        <div className="space-y-3">
+                          <textarea 
+                            className="w-full px-3 py-2 rounded border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 text-sm min-h-[80px]"
+                            placeholder="Enter instructions for the agent..."
+                          />
+                          
+                          {/* File upload */}
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1">
+                              <label className="flex items-center gap-2 text-xs border rounded-md px-3 py-2 border-dashed border-border bg-muted/20 cursor-pointer hover:bg-muted/30 w-full">
+                                <input type="file" className="hidden" />
+                                <span>Upload File</span>
+                              </label>
+                            </div>
+                            <Button variant="default" size="sm">Run Agent</Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
 
       {/* Footer */}
