@@ -218,6 +218,27 @@ export const ToolPlayground = () => {
 
   return (
     <div className="space-y-4 p-4">
+      {/* Global active tab selector */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center space-x-2">
+          <span className="text-sm text-muted-foreground">Active Tab:</span>
+          <select
+            value={tabId || ''}
+            onChange={(e) => setTabId(e.target.value)}
+            className="text-sm rounded-md border border-input bg-background px-3 py-1"
+          >
+            {tabs.map((tab) => (
+              <option key={tab.id} value={tab.id}>
+                {tab.title || tab.url || `Tab ${tab.id}`}
+              </option>
+            ))}
+          </select>
+          <Button variant="outline" size="sm" onClick={refreshTabs}>
+            Refresh Tabs
+          </Button>
+        </div>
+      </div>
+
       <Tabs defaultValue="tabs" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="tabs">Tabs</TabsTrigger>
@@ -243,22 +264,7 @@ export const ToolPlayground = () => {
                   />
                   <Button onClick={handleNavigate}>New Tab</Button>
                 </div>
-                {tabs.length > 0 && (
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm text-muted-foreground">Active Tab:</span>
-                    <select
-                      value={tabId || ''}
-                      onChange={(e) => setTabId(e.target.value)}
-                      className="text-sm rounded-md border border-input bg-background px-3 py-1"
-                    >
-                      {tabs.map((tab) => (
-                        <option key={tab.id} value={tab.id}>
-                          {tab.title || tab.url || `Tab ${tab.id}`}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                {/* Active Tab selector moved to global header */}
               </div>
               <div className="flex space-x-2">
                 <Button variant="outline" onClick={handleGoBack}>
@@ -306,7 +312,7 @@ export const ToolPlayground = () => {
         </TabsContent>
 
         <TabsContent value="dom-tools" className="space-y-4">
-          <DomSemanticTools />
+          <DomSemanticTools tabId={tabId} />
         </TabsContent>
       </Tabs>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -7,33 +7,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Textarea } from './ui/textarea';
 import { useToast } from './ui/use-toast';
 import { useDomUtils } from '../hooks/useDomUtils';
-import { RefreshCw } from 'lucide-react';
 
-export function DomSemanticTools() {
+export function DomSemanticTools({ tabId }: { tabId: string }) {
   const { dom, semantic, isLoading, error, result } = useDomUtils();
   const { toast } = useToast();
   const [selector, setSelector] = useState('');
-  const [content, setContent] = useState('');
   const [options, setOptions] = useState('{}');
-  const [tabs, setTabs] = useState<Array<{ id: string; title: string; url: string }>>([]);
-  const [selectedTabId, setSelectedTabId] = useState<string>('');
 
-  // Load tabs on component mount
-  useEffect(() => {
-    const loadTabs = async () => {
-      try {
-        const tabsList = await dom.getTabs();
-        setTabs(tabsList);
-        if (tabsList.length > 0) {
-          const activeTab = tabsList.find(tab => tab.id === selectedTabId) || tabsList[0];
-          setSelectedTabId(activeTab.id);
-        }
-      } catch (error) {
-        console.error('Failed to load tabs:', error);
-      }
-    };
-    loadTabs();
-  }, []);
+  // No internal tab state; tabId is provided by parent
 
   const handleError = (err: Error) => {
     console.error('Error:', err);
@@ -54,10 +35,10 @@ export function DomSemanticTools() {
 
   const handleDomAction = async (action: (tabId: string) => Promise<any>, requireTab = true) => {
     try {
-      if (requireTab && !selectedTabId) {
+      if (requireTab && !tabId) {
         throw new Error('No tab selected');
       }
-      const result = await action(selectedTabId);
+      const result = await action(tabId);
       if (result?.success) {
         handleSuccess(result.data);
       } else {
@@ -75,7 +56,7 @@ export function DomSemanticTools() {
       handleError(new Error('Please enter a CSS selector'));
       return;
     }
-    handleDomAction((tabId: string) => dom.extractElement(selector, ['textContent', 'innerHTML'], tabId));
+    handleDomAction((tid: string) => dom.extractElement(selector, ['textContent', 'innerHTML'], tid));
   };
 
   const handleExtractTable = () => {
@@ -83,57 +64,30 @@ export function DomSemanticTools() {
       handleError(new Error('Please enter a CSS selector'));
       return;
     }
-    handleDomAction((tabId: string) => dom.extractTable(selector, JSON.parse(options), tabId));
+    handleDomAction((tid: string) => dom.extractTable(selector, JSON.parse(options || '{}'), tid));
   };
 
   const handleExtractImages = () => {
-    handleDomAction((tabId: string) => 
-      dom.extractImages(selector.trim() || undefined, JSON.parse(options), tabId)
+    handleDomAction((tid: string) => 
+      dom.extractImages(selector.trim() || undefined, JSON.parse(options || '{}'), tid)
     );
   };
 
   const handleExtractLinks = () => {
-    handleDomAction((tabId: string) => 
-      dom.extractLinks(selector.trim() || undefined, JSON.parse(options), tabId)
+    handleDomAction((tid: string) => 
+      dom.extractLinks(selector.trim() || undefined, JSON.parse(options || '{}'), tid)
     );
   };
 
   const handleExtractMeta = () => {
-    handleDomAction((tabId: string) => 
-      dom.extractMeta(JSON.parse(options), tabId)
+    handleDomAction((tid: string) => 
+      dom.extractMeta(JSON.parse(options || '{}'), tid)
     );
   };
 
   return (
     <Card className="w-full">
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>DOM Tools</CardTitle>
-          <div className="flex items-center space-x-2">
-            <select
-              value={selectedTabId}
-              onChange={(e) => setSelectedTabId(e.target.value)}
-              className="text-sm border rounded px-2 py-1 bg-background"
-            >
-              {tabs.map((tab) => (
-                <option key={tab.id} value={tab.id}>
-                  {tab.title || tab.url}
-                </option>
-              ))}
-            </select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                const tabsList = await dom.getTabs();
-                setTabs(tabsList);
-              }}
-              title="Refresh tabs"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
         <CardTitle>DOM & Semantic Tools</CardTitle>
         <CardDescription>Extract and analyze page content</CardDescription>
       </CardHeader>
@@ -205,48 +159,37 @@ export function DomSemanticTools() {
           </TabsContent>
           
           <TabsContent value="semantic" className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="content">Content</Label>
-              <Textarea
-                id="content"
-                value={content}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setContent(e.target.value)}
-                placeholder="Enter content to analyze"
-                className="min-h-[100px]"
-              />
-            </div>
-            
             <div className="grid grid-cols-2 gap-2">
               <Button 
-                onClick={() => handleDomAction(() => semantic.extract(content, JSON.parse(options)))}
+                onClick={() => handleDomAction((tid) => semantic.extract(JSON.parse(options || '{}'), tid))}
                 disabled={isLoading}
               >
                 Extract Data
               </Button>
               
               <Button 
-                onClick={() => handleDomAction(() => semantic.summarize(JSON.parse(options)))}
+                onClick={() => handleDomAction((tid) => semantic.summarize(JSON.parse(options || '{}'), tid))}
                 disabled={isLoading}
               >
                 Summarize
               </Button>
               
               <Button 
-                onClick={() => handleDomAction(() => semantic.recognizeEntities(JSON.parse(options)))}
+                onClick={() => handleDomAction((tid) => semantic.recognizeEntities(JSON.parse(options || '{}'), tid))}
                 disabled={isLoading}
               >
                 Recognize Entities
               </Button>
               
               <Button 
-                onClick={() => handleDomAction(() => semantic.classify(JSON.parse(options)))}
+                onClick={() => handleDomAction((tid) => semantic.classify(JSON.parse(options || '{}'), tid))}
                 disabled={isLoading}
               >
                 Classify
               </Button>
               
               <Button 
-                onClick={() => handleDomAction(() => semantic.extractSemanticTable(JSON.parse(options)))}
+                onClick={() => handleDomAction((tid) => semantic.extractSemanticTable(JSON.parse(options || '{}'), tid))}
                 disabled={isLoading}
                 className="col-span-2"
               >

@@ -21,7 +21,7 @@ export class DOMUtils {
     try {
       const result = await view.webContents.executeJavaScript(`
         (() => {
-          const elements = Array.from(document.querySelectorAll('${selector.replace(/'/g, '\\' + '"')}'));
+          const elements = Array.from(document.querySelectorAll('${selector.replace(/'/g, "\\'")}'));
           return elements.map(el => {
             const result: any = {};
             
@@ -64,7 +64,7 @@ export class DOMUtils {
     try {
       const result = await view.webContents.executeJavaScript(`
         (() => {
-          const table = document.querySelector('${selector.replace(/'/g, '\\' + '"')}');
+          const table = document.querySelector('${selector.replace(/'/g, "\\'")}');
           if (!table) return [];
           
           const rows = Array.from(table.querySelectorAll('tr'));
@@ -109,7 +109,7 @@ export class DOMUtils {
     try {
       const result = await view.webContents.executeJavaScript(`
         (() => {
-          const images = Array.from(document.querySelectorAll('${selector.replace(/'/g, '\\' + '"')}'));
+          const images = Array.from(document.querySelectorAll('${selector.replace(/'/g, "\\'")}'));
           return images.map(img => {
             const result = {
               src: img.src,
@@ -146,7 +146,7 @@ export class DOMUtils {
     try {
       const result = await view.webContents.executeJavaScript(`
         (() => {
-          const links = Array.from(document.querySelectorAll('${selector.replace(/'/g, '\\' + '"')}'));
+          const links = Array.from(document.querySelectorAll('${selector.replace(/'/g, "\\'")}'));
           return links
             .filter(link => {
               const href = link.href;

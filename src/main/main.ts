@@ -773,19 +773,7 @@ async function createWindow() {
     _cb(false);
   });
 
-  // Update history on navigation and broadcast URL changes (legacy single-view). Guarded for safety.
-  if (view) {
-    view.webContents.on('did-navigate', async (_e: ElectronEvent, url: string) => {
-      try {
-        const title = await view!.webContents.getTitle();
-        historyService?.recordVisit(url, title || url);
-      } catch {}
-      sendRenderer('tab:url-changed', url);
-    });
-    view.webContents.on('did-navigate-in-page', async (_e: ElectronEvent, url: string) => {
-      sendRenderer('tab:url-changed', url);
-    });
-  }
+  // Legacy single-view URL broadcaster removed to avoid cross-tab URL updates.
 
   // IPC handlers
   // Allow renderer to temporarily hide/show the BrowserView (e.g., for modal overlays)
@@ -806,6 +794,14 @@ async function createWindow() {
 
   // Open devtools docked to the right for the currently focused contents
   ipcMain.handle('devtools:open', () => {
+    try {
+      const focused = BrowserWindow.getFocusedWindow();
+      if (focused) focused.webContents.openDevTools({ mode: 'right' });
+      else if (view) view.webContents.openDevTools({ mode: 'right' });
+    } catch {}
+  });
+  // Alias for preload API compatibility
+  ipcMain.handle('open-dev-tools', () => {
     try {
       const focused = BrowserWindow.getFocusedWindow();
       if (focused) focused.webContents.openDevTools({ mode: 'right' });
@@ -841,11 +837,7 @@ async function createWindow() {
       const base = (config.search.searxng?.baseUrl || '').replace(/\/$/, '');
       if (base) return `${base}/search?q=${enc}`;
     }
-    if (p === 'brave') return `https://search.brave.com/search?q=${enc}`;
-    if (p === 'google') return `https://www.google.com/search?q=${enc}`;
-    if (p === 'bing') return `https://www.bing.com/search?q=${enc}`;
-    if (p === 'presearch') return `https://presearch.com/search?q=${enc}`;
-    return `https://duckduckgo.com/?q=${enc}`;
+    return '';
   }
 
   ipcMain.handle('omnibox:navigate', async (_ev: IpcMainInvokeEvent, { url: input, tabId }: { url: string, tabId?: string }) => {
@@ -867,7 +859,10 @@ async function createWindow() {
           tab.title = targetView.webContents.getTitle();
         }
         
-        sendRenderer('tab:url-changed', url);
+        // Only send URL change if this is the active tab
+        if (tab && tab.id === activeTabId) {
+          sendRenderer('tab:url-changed', url);
+        }
         return { url, tabId: tab?.id };
       }
       // Build in-app search results page with summary & citations
@@ -937,8 +932,10 @@ async function createWindow() {
           searchTab.title = `Search: ${s}`;
         }
         
-        // Broadcast canonical search URL for the internal results page
-        sendRenderer('tab:url-changed', searchUrl);
+        // Only broadcast URL change if this is the active tab
+        if (searchTab && searchTab.id === activeTabId) {
+          sendRenderer('tab:url-changed', searchUrl);
+        }
         
         return { url: searchUrl, tabId: searchTab?.id };
       } catch (searchErr) {
@@ -955,7 +952,10 @@ async function createWindow() {
             fallbackTab.title = targetView.webContents.getTitle();
           }
           
-          sendRenderer('tab:url-changed', fallbackUrl);
+          // Only broadcast URL change if this is the active tab
+          if (fallbackTab && fallbackTab.id === activeTabId) {
+            sendRenderer('tab:url-changed', fallbackUrl);
+          }
           return { url: fallbackUrl, tabId: fallbackTab?.id };
         }
         throw searchErr; // Re-throw if we couldn't handle the fallback
@@ -967,21 +967,75 @@ async function createWindow() {
   });
 
   ipcMain.handle('tab:back', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string } = {}) => {
-    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
-    await targetView?.webContents.goBack();
-    return `Navigated back in tab ${tabId || 'active'}`;
+    const targetTabId = tabId || activeTabId;
+    const targetTab = targetTabId ? tabs.find(t => t.id === targetTabId) : null;
+    const targetView = targetTab?.view;
+    
+    if (!targetView) return `No tab found for ${targetTabId || 'active'}`;
+    
+    await targetView.webContents.goBack();
+    
+    // Update tab URL after navigation
+    const newUrl = targetView.webContents.getURL();
+    if (targetTab && newUrl) {
+      targetTab.url = newUrl;
+      targetTab.title = targetView.webContents.getTitle() || targetTab.title;
+      
+      // Only send URL change if this is the active tab
+      if (targetTabId === activeTabId) {
+        sendRenderer('tab:url-changed', newUrl);
+      }
+    }
+    
+    return `Navigated back in tab ${targetTabId || 'active'}`;
   });
 
   ipcMain.handle('tab:forward', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string } = {}) => {
-    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
-    await targetView?.webContents.goForward();
-    return `Navigated forward in tab ${tabId || 'active'}`;
+    const targetTabId = tabId || activeTabId;
+    const targetTab = targetTabId ? tabs.find(t => t.id === targetTabId) : null;
+    const targetView = targetTab?.view;
+    
+    if (!targetView) return `No tab found for ${targetTabId || 'active'}`;
+    
+    await targetView.webContents.goForward();
+    
+    // Update tab URL after navigation
+    const newUrl = targetView.webContents.getURL();
+    if (targetTab && newUrl) {
+      targetTab.url = newUrl;
+      targetTab.title = targetView.webContents.getTitle() || targetTab.title;
+      
+      // Only send URL change if this is the active tab
+      if (targetTabId === activeTabId) {
+        sendRenderer('tab:url-changed', newUrl);
+      }
+    }
+    
+    return `Navigated forward in tab ${targetTabId || 'active'}`;
   });
 
   ipcMain.handle('tab:reload', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string } = {}) => {
-    const targetView = tabId ? tabs.find(t => t.id === tabId)?.view : view;
-    await targetView?.webContents.reload();
-    return `Reloaded tab ${tabId || 'active'}`;
+    const targetTabId = tabId || activeTabId;
+    const targetTab = targetTabId ? tabs.find(t => t.id === targetTabId) : null;
+    const targetView = targetTab?.view;
+    
+    if (!targetView) return `No tab found for ${targetTabId || 'active'}`;
+    
+    await targetView.webContents.reload();
+    
+    // Update tab URL after reload (in case it changed)
+    const newUrl = targetView.webContents.getURL();
+    if (targetTab && newUrl) {
+      targetTab.url = newUrl;
+      targetTab.title = targetView.webContents.getTitle() || targetTab.title;
+      
+      // Only send URL change if this is the active tab
+      if (targetTabId === activeTabId) {
+        sendRenderer('tab:url-changed', newUrl);
+      }
+    }
+    
+    return `Reloaded tab ${targetTabId || 'active'}`;
   });
   // Tabs IPC
   ipcMain.handle('tabs:create', async (_e: IpcMainInvokeEvent, url?: string) => { const t = createTab(url); return t ? { id: t.id } : undefined; });
@@ -1379,4 +1433,87 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+
+// Tool Playground explicit nav:* handlers (tab isolation, default to active tab)
+ipcMain.handle('nav:back', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string }) => {
+  const targetTabId = tabId || activeTabId;
+  const tab = targetTabId ? tabs.find(t => t.id === targetTabId) : undefined;
+  if (tab && tab.view.webContents.canGoBack()) {
+    await tab.view.webContents.goBack();
+    // Wait for navigation to complete
+    await new Promise(resolve => {
+      const handler = () => {
+        tab.view.webContents.removeListener('did-navigate', handler);
+        resolve(undefined);
+      };
+      tab.view.webContents.once('did-navigate', handler);
+      setTimeout(handler, 1200);
+    });
+    tab.url = tab.view.webContents.getURL();
+    tab.title = await tab.view.webContents.getTitle();
+    sendRenderer('tabs:updated', listTabs());
+    // Only send tab:url-changed if this is the active tab
+    if (tab.id === activeTabId) sendRenderer('tab:url-changed', tab.url);
+    return { tabId: tab.id };
+  }
+  return { tabId: targetTabId, error: 'Cannot go back' };
+});
+
+ipcMain.handle('nav:forward', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string }) => {
+  const targetTabId = tabId || activeTabId;
+  const tab = targetTabId ? tabs.find(t => t.id === targetTabId) : undefined;
+  if (tab && tab.view.webContents.canGoForward()) {
+    await tab.view.webContents.goForward();
+    await new Promise(resolve => {
+      const handler = () => {
+        tab.view.webContents.removeListener('did-navigate', handler);
+        resolve(undefined);
+      };
+      tab.view.webContents.once('did-navigate', handler);
+      setTimeout(handler, 1200);
+    });
+    tab.url = tab.view.webContents.getURL();
+    tab.title = await tab.view.webContents.getTitle();
+    sendRenderer('tabs:updated', listTabs());
+    if (tab.id === activeTabId) sendRenderer('tab:url-changed', tab.url);
+    return { tabId: tab.id };
+  }
+  return { tabId: targetTabId, error: 'Cannot go forward' };
+});
+
+ipcMain.handle('nav:reload', async (_e: IpcMainInvokeEvent, { tabId }: { tabId?: string }) => {
+  const targetTabId = tabId || activeTabId;
+  const tab = targetTabId ? tabs.find(t => t.id === targetTabId) : undefined;
+  if (tab) {
+    await tab.view.webContents.reload();
+    await new Promise(resolve => {
+      const handler = () => {
+        tab.view.webContents.removeListener('did-navigate', handler);
+        resolve(undefined);
+      };
+      tab.view.webContents.once('did-navigate', handler);
+      setTimeout(handler, 1200);
+    });
+    tab.url = tab.view.webContents.getURL();
+    tab.title = await tab.view.webContents.getTitle();
+    sendRenderer('tabs:updated', listTabs());
+    if (tab.id === activeTabId) sendRenderer('tab:url-changed', tab.url);
+    return { tabId: tab.id };
+  }
+  return { tabId: targetTabId, error: 'Cannot reload' };
+});
+
+ipcMain.handle('nav:navigate', async (_e: IpcMainInvokeEvent, { tabId, url }: { tabId?: string, url: string }) => {
+  const targetTabId = tabId || activeTabId;
+  const tab = targetTabId ? tabs.find(t => t.id === targetTabId) : undefined;
+  if (tab && url) {
+    await tab.view.webContents.loadURL(url);
+    tab.url = tab.view.webContents.getURL();
+    tab.title = await tab.view.webContents.getTitle();
+    sendRenderer('tabs:updated', listTabs());
+    if (tab.id === activeTabId) sendRenderer('tab:url-changed', tab.url);
+    return { tabId: tab.id, url };
+  }
+  return { tabId: targetTabId, url, error: 'Cannot navigate' };
 });

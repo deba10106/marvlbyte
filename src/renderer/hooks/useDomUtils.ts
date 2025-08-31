@@ -11,11 +11,11 @@ type DomUtils = {
 };
 
 type SemanticUtils = {
-  extract: (content: string, options?: any) => Promise<any>;
-  summarize: (options?: any) => Promise<any>;
-  recognizeEntities: (options?: any) => Promise<any>;
-  classify: (options: any) => Promise<any>;
-  extractSemanticTable: (options: any) => Promise<any>;
+  extract: (options?: any, tabId?: string) => Promise<any>;
+  summarize: (options?: any, tabId?: string) => Promise<any>;
+  recognizeEntities: (options?: any, tabId?: string) => Promise<any>;
+  classify: (options: any, tabId?: string) => Promise<any>;
+  extractSemanticTable: (options: any, tabId?: string) => Promise<any>;
 };
 
 declare global {
@@ -94,29 +94,30 @@ export function useDomUtils() {
   };
 
   const semantic = {
-    extract: (content: string, options?: any) =>
+    extract: (options?: any, tabId?: string) =>
       callWithErrorHandling(() => 
-        window.electron.semantic.extract(content, options)
+        // Call overload (options, tabId) to omit content when a tab is targeted
+        window.electron.semantic.extract(options, tabId)
       ),
     
-    summarize: (options?: any) =>
+    summarize: (options?: any, tabId?: string) =>
       callWithErrorHandling(() => 
-        window.electron.semantic.summarize(options)
+        window.electron.semantic.summarize(options, tabId)
       ),
     
-    recognizeEntities: (options?: any) =>
+    recognizeEntities: (options?: any, tabId?: string) =>
       callWithErrorHandling(() => 
-        window.electron.semantic.recognizeEntities(options)
+        window.electron.semantic.recognizeEntities(options, tabId)
       ),
     
-    classify: (options: any) =>
+    classify: (options: any, tabId?: string) =>
       callWithErrorHandling(() => 
-        window.electron.semantic.classify(options)
+        window.electron.semantic.classify(options, tabId)
       ),
     
-    extractSemanticTable: (options: any) =>
+    extractSemanticTable: (options: any, tabId?: string) =>
       callWithErrorHandling(() => 
-        window.electron.semantic.extractSemanticTable(options)
+        window.electron.semantic.extractSemanticTable(options, tabId)
       ),
   };
 

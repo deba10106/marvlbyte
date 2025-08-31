@@ -257,44 +257,65 @@ const api: CometApi = {
   },
 };
 
-// Expose DOM and Semantic utilities
+// Expose DOM and Semantic utilities (aligned with main IPC handlers)
 const domUtils = {
-  extractElement: (selector: string, attributes?: string[]) => 
-    ipcRenderer.invoke('dom:extractElement', { selector, attributes }),
-  
-  extractTable: (selector: string, options?: any) => 
-    ipcRenderer.invoke('dom:extractTable', { selector, options }),
-    
-  extractImages: (selector?: string, options?: any) => 
-    ipcRenderer.invoke('dom:extractImages', { selector, options }),
-    
-  extractLinks: (selector?: string, options?: any) => 
-    ipcRenderer.invoke('dom:extractLinks', { selector, options }),
-    
-  extractMeta: (options?: any) => 
-    ipcRenderer.invoke('dom:extractMeta', { options })
+  extractElement: (selector: string, attributes?: string[], tabId?: string) =>
+    ipcRenderer.invoke('dom:extract-element', { tabId, selector, options: { attributes } }),
+
+  extractTable: (selector: string, options?: any, tabId?: string) =>
+    ipcRenderer.invoke('dom:extract-table', { tabId, selector, options }),
+
+  extractImages: (selector?: string, options?: any, tabId?: string) =>
+    ipcRenderer.invoke('dom:extract-images', { tabId, selector, options }),
+
+  extractLinks: (selector?: string, options?: any, tabId?: string) =>
+    ipcRenderer.invoke('dom:extract-links', { tabId, selector, options }),
+
+  extractMeta: (options?: any, tabId?: string) =>
+    ipcRenderer.invoke('dom:extract-meta', { tabId, options })
 };
 
 const semanticUtils = {
-  extract: (content: string, options?: any) => 
-    ipcRenderer.invoke('semantic:extract', { content, options }),
-    
-  summarize: (options?: any) => 
-    ipcRenderer.invoke('semantic:summarize', { options }),
-    
-  recognizeEntities: (options?: any) => 
-    ipcRenderer.invoke('semantic:recognizeEntities', { options }),
-    
-  classify: (options: any) => 
-    ipcRenderer.invoke('semantic:classify', { options }),
-    
-  extractSemanticTable: (options: any) => 
-    ipcRenderer.invoke('semantic:extractSemanticTable', { options })
+  extract: (contentOrOptions: any, optionsOrTabId?: any, maybeTabId?: string) => {
+    let content: string | undefined;
+    let options: any = {};
+    let tabId: string | undefined;
+
+    if (typeof contentOrOptions === 'string' || contentOrOptions === undefined) {
+      content = contentOrOptions as string | undefined;
+      options = optionsOrTabId || {};
+      tabId = maybeTabId;
+    } else {
+      options = contentOrOptions || {};
+      tabId = optionsOrTabId;
+    }
+
+    const payloadOptions = content !== undefined ? { ...options, content } : options;
+    return ipcRenderer.invoke('semantic:extract', { tabId, options: payloadOptions });
+  },
+
+  summarize: (options?: any, tabId?: string) =>
+    ipcRenderer.invoke('semantic:summarize', { tabId, options }),
+
+  recognizeEntities: (options?: any, tabId?: string) =>
+    ipcRenderer.invoke('semantic:recognize-entities', { tabId, options }),
+
+  classify: (options: any, tabId?: string) =>
+    ipcRenderer.invoke('semantic:classify', { tabId, options }),
+
+  extractSemanticTable: (options: any, tabId?: string) =>
+    ipcRenderer.invoke('semantic:extract-table', { tabId, options })
 };
 
 // Expose both the main API and the utilities
 contextBridge.exposeInMainWorld('comet', {
   ...api,
+  dom: domUtils,
+  semantic: semanticUtils
+});
+
+// Backward-compatible alias expected by some renderer hooks
+contextBridge.exposeInMainWorld('electron', {
   dom: domUtils,
   semantic: semanticUtils
 });

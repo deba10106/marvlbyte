@@ -76,7 +76,7 @@ const DEFAULT_CONFIG: AppConfig = {
     gemini: {
       apiKey: process.env.GEMINI_API_KEY || '',
       host: process.env.GEMINI_HOST || process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com',
-      model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     },
     instantSummaries: {
       enabled: true,
